@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+# generated outputs (reproducible from the scripts)
+validation/out/
+examples/out/
+*.npz
+# reference PDFs are copyrighted publisher/thesis files: kept locally, not committed
+refs/*.pdf
