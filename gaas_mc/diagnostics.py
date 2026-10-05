@@ -32,7 +32,19 @@ INK = "#2b2b29"
 MUTED = "#8a8a84"
 
 
+NAMED_STYLE = {
+    "iv_abs[Gamma->L]": (SLOTS[3], "^"),
+    "iv_em[Gamma->L]": ("#2b2b29", "v"),
+    "iv_abs[Gamma->X]": (SLOTS[6], "o"),
+    "iv_em[Gamma->X]": (SLOTS[4], "s"),
+    "eh_hh[Gamma]": (SLOTS[5], "*"),
+    "eh_lh[Gamma]": (SLOTS[5], "x"),
+}
+
+
 def style_for(name):
+    if name in NAMED_STYLE:
+        return NAMED_STYLE[name]
     key = name.split("[")[0]
     return ENTITY_STYLE.get(key, (MUTED, None))
 

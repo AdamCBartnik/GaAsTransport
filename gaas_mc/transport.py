@@ -143,8 +143,14 @@ class Simulation:
     def rates_at(self, E, valley_index):
         """Interpolated rate matrix (M_v, n) for the mechanisms of one valley."""
         idx = self.mech_by_valley[valley_index]
-        return np.array([np.where(E > self.thresholds[i], np.interp(E, self.E_grid, self.rate_table[i]), 0.0)
-                         for i in idx]).reshape(len(idx), np.size(E))
+        E = np.atleast_1d(E)
+        # one bracket search for all mechanisms (same as np.interp per row, with end clamping)
+        g = self.E_grid
+        j = np.clip(np.searchsorted(g, E, side="right"), 1, g.size - 1)
+        w = np.clip((E - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
+        T = self.rate_table[idx]
+        R = T[:, j - 1] * (1 - w) + T[:, j] * w
+        return np.where(E[None, :] > self.thresholds[idx][:, None], R, 0.0)
 
     # ------------------------------------------------------------------------------------
     # Free flight

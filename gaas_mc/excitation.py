@@ -39,6 +39,7 @@ import numpy as np
 
 from . import bands
 from .assumptions import DEFAULT
+from .constants import EV
 from .optics import as_absorption_model
 from .particle import Ensemble
 
@@ -119,7 +120,7 @@ def band_weights(sample, hw, rule):
 
 
 def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_rule=None,
-                broadening=True, below_gap_energy=None):
+                broadening=True, below_gap_energy=None, allow_optics_extrapolation=False):
     """Generate n photoexcited electrons in the Gamma valley at t = 0.
 
     Parameters
@@ -134,6 +135,8 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     spin_rule : overrides assumptions.initial_spin_rule
     broadening : apply Eq. 11
     below_gap_energy : for hv <= Eg(p), place electrons at this energy [J]
+    allow_optics_extrapolation : permit hv below the absorption model's stated validity range
+        (Adachi 1989: hv < E0 = 1.42 eV, where alpha is only the unphysical E2-oscillator tail)
 
     Returns
     -------
@@ -144,6 +147,11 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     model = as_absorption_model(absorption if absorption is not None else assumptions.absorption_model)
     mat = sample.material
     gv = mat.gamma
+    hv_min = getattr(model, "valid_min_hv_eV", None)
+    if hv_min is not None and hw / EV < hv_min and not allow_optics_extrapolation:
+        raise ValueError(f"hv = {hw / EV:.4f} eV is below the absorption model's validity limit "
+                         f"{hv_min} eV (Adachi 1989: alpha there is only the E2-oscillator tail; "
+                         "gap narrowing is not applied). Pass allow_optics_extrapolation=True to override.")
     alpha_abs = float(np.squeeze(model.absorption_coefficient(hw)))
     if not alpha_abs > 0:
         raise ValueError(f"absorption model gives alpha = {alpha_abs} at hv = {hw / 1.602176634e-19:.4f} eV "

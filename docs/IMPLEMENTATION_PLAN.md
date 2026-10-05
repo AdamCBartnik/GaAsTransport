@@ -154,6 +154,20 @@ and leaves e–h out.
 
 ## 4. Ambiguities, inconsistencies, and missing details
 
+> **Status (after the user decisions):** the current choice for every item below is recorded in
+> `docs/MODEL_ASSUMPTIONS.md` and selectable via `ModelAssumptions`.
+>
+> | Item | Status |
+> |---|---|
+> | A1 | Resolved: the numerator form reproduces C21 Fig. 7, so the printed Eq. 33 is a typo. |
+> | A2 | Resolved: per-initial-valley multiplicities. |
+> | A3 | Isotropic. |
+> | A4 | Resolved: per-band default; prose mode is optional. |
+> | A5 | Adachi 1989 default, with a sub-E0 tail artifact (open). |
+> | A10 | Resolved: FD hh+lh bath, exact kinematics, FD Pauli. The C21 step rule breaks detailed balance. |
+> | A13 | Resolved: spin frozen in L/X, with bookkeeping. |
+> | Self-scattering | Removed for field-free runs. |
+
 **Affects Stage A**
 
 * **A3 — Initial k direction.** C21 does not specify it. [K13] gives only the vertical-transition energy. We

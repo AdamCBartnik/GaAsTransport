@@ -17,10 +17,14 @@ That script notes three gaps in the paper, which are reproduced here:
 TODO(verify): check each parameter against Adachi (1989) Table I once the PDF is in refs/.
 
 Limitations relevant to photoemission:
-  * The E0 term has no broadening, exciton, or Urbach tail, so alpha = 0 for hv < E0 = 1.42 eV.
+  * The E0 term has no broadening, exciton, or Urbach tail: it vanishes for hv < E0 = 1.42 eV.
+  * The E2 damped-harmonic-oscillator term has a Lorentzian tail that gives eps2 > 0 at ALL
+    energies. Below E0 this tail is the only absorption: about 1.2e3 /cm at 1.0 eV and 2.5e3 /cm
+    at 1.4 eV, which is unphysical. Above E0 it adds about 2e3 /cm (roughly 25% of alpha at 1.45 eV,
+    7% at 1.9 eV). The model is kept as published; photoexcite() refuses hv < E0 for this model
+    unless explicitly allowed.
   * The model is for intrinsic GaAs. Doping-induced gap narrowing (C21 Eq. 10) is deliberately
-    NOT applied to the optical data (docs/MODEL_ASSUMPTIONS.md). Photons with
-    Eg(p) < hv < E0 therefore give alpha = 0, and photoexcite() refuses them.
+    NOT applied to the optical data (docs/MODEL_ASSUMPTIONS.md).
   * C21 Fig. 3 uses Adachi's model *fitted* to Zollner (2001) data. Those fit parameters are not
     published, so this curve need not coincide with C21 Fig. 3.
 """
@@ -62,6 +66,7 @@ class Adachi1989GaAs:
 
     def __init__(self, params: Adachi1989Params = Adachi1989Params()):
         self.p = params
+        self.valid_min_hv_eV = params.E0       # below E0, alpha comes only from the E2 tail
 
     def dielectric(self, hv_eV):
         """Complex dielectric function eps1 + i eps2 at photon energy hv [eV]."""
