@@ -30,6 +30,8 @@ class Ensemble:
     dt_spin: np.ndarray    # time since last real (non-self) scattering [s] (Eq. 54)
     n_flips: np.ndarray    # number of spin flips
     pid: np.ndarray        # particle id
+    time_in_valley: np.ndarray   # (n, 3) time spent in Gamma, L, X [s]
+    visited: np.ndarray          # (n, 3) bool, valley ever occupied
 
     @classmethod
     def create(cls, z, k, E, spin, valley=0, t=0.0):
@@ -43,7 +45,8 @@ class Ensemble:
             valley=np.full(n, valley, np.int8), spin=spin,
             status=np.full(n, ALIVE, np.int8), z0=z.copy(), E0=E.copy(), spin0=spin.copy(),
             band=np.full(n, -1, np.int8), dt_spin=np.zeros(n), n_flips=np.zeros(n, np.int32),
-            pid=np.arange(n),
+            pid=np.arange(n), time_in_valley=np.zeros((n, 3)),
+            visited=np.eye(3, dtype=bool)[np.full(n, valley)],
         )
 
     def __len__(self):

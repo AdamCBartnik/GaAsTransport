@@ -20,23 +20,26 @@ Spin, Eqs. 12-16 (D'yakonov & Perel 1971, spherical bands):
     g = sqrt(36 x^2 - 12 x (zeta + 3) + (3 zeta + 1)^2),  x = (hw - Eg)/Delta_so
     zeta = (4/3) (1/m_e + 3/(4 m_lh) + 1/(4 m_hh)) / (1/m_lh - 1/m_hh)
 
-Choices not fixed by the paper (see docs/IMPLEMENTATION_PLAN.md):
-  * A3: the initial k direction is isotropic.
-  * A4: band and spin assignment.
-        spin_model="chubenko_text" (default): an hh fraction (1+ESP0)/2 with s = +1; the rest
-        lh/so (split K_lh : K_so) with s = -1, as described in the text after Eq. 16. Of the two
-        readings, this one reproduces the relative hh/lh/so peak heights of [C21] Fig. 5
-        (validation/stage_a_excitation.py).
-        spin_model="per_band": band i with probability K_i/sum K, then s = +1 with probability
-        (1 + P_i)/2 (the D'yakonov-Perel 1971 per-band polarizations). Also reproduces Eq. 12.
-  * A5: l(hw) must be supplied by the user (scalar [m] or callable hw[J] -> l[m]).
-  * A16: hw < Eg raises unless below_gap_energy is given ([K13] uses 5 meV).
+Model assumptions (docs/MODEL_ASSUMPTIONS.md; selectable through ModelAssumptions):
+  * initial_spin_rule = "per_band" (default; user decision 1). Eqs. 12-16 are authoritative:
+        band i is chosen with probability K_i / sum K, and spin s = +1 with probability (1 + P_i)/2.
+        The ensemble ESP equals Eq. 12 exactly in expectation.
+    "chubenko_prose": the literal prose after Eq. 16 (hh -> s = +1; lh, so -> s = -1). To keep
+        ESP0 equal to Eq. 12, the hh fraction is (1 + ESP0)/2 and the lh : so split is K_lh : K_so.
+        This mode reproduces the relative peak heights of C21 Fig. 5 somewhat better.
+  * initial_k_direction = "isotropic" (C21 is silent).
+  * absorption_model = Adachi (1989) MDF for intrinsic GaAs (optics.py; user decision 2). Any
+    object with absorption_coefficient(hv) can be passed instead. Doping-induced gap narrowing
+    is NOT applied to the optical data. Photons with Eg(p) < hv but alpha(hv) = 0 are refused.
+  * hv <= Eg(p): refused unless below_gap_energy is given ([K13] uses 5 meV).
 """
 from __future__ import annotations
 
 import numpy as np
 
 from . import bands
+from .assumptions import DEFAULT
+from .optics import as_absorption_model
 from .particle import Ensemble
 
 HH, LH, SO = 0, 1, 2
@@ -99,13 +102,25 @@ def excess_energy(sample, hw, band):
     return G1 - dEh
 
 
-def absorption_length(l, hw):
-    return float(l(hw)) if callable(l) else float(l)
+SPIN_RULE_ALIASES = {"per_band": "per_band", "chubenko_prose": "chubenko_prose",
+                     "chubenko_text": "chubenko_prose"}
 
 
-def photoexcite(sample, hw, n, rng, absorption_len, spin_model="chubenko_text",
-                broadening=True, below_gap_energy=None, direction="isotropic"):
-    """Generate n photoexcited electrons in the Gamma valley.
+def band_weights(sample, hw, rule):
+    """(weights over hh/lh/so, probability of s = +1 for each band) for the chosen rule."""
+    P, K, esp = dp71_weights(sample, hw)
+    rule = SPIN_RULE_ALIASES[rule]
+    if rule == "per_band":
+        return K, (1 + P) / 2
+    f_hh = (1 + esp) / 2
+    rest = K[LH] + K[SO]
+    w = np.array([f_hh, (1 - f_hh) * K[LH] / rest, (1 - f_hh) * K[SO] / rest])
+    return w, np.array([1.0, 0.0, 0.0])
+
+
+def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_rule=None,
+                broadening=True, below_gap_energy=None):
+    """Generate n photoexcited electrons in the Gamma valley at t = 0.
 
     Parameters
     ----------
@@ -113,42 +128,39 @@ def photoexcite(sample, hw, n, rng, absorption_len, spin_model="chubenko_text",
     hw : photon energy [J]
     n : number of electrons
     rng : numpy.random.Generator
-    absorption_len : l [m] or callable hw -> l
-    spin_model : "chubenko_text" (default) | "per_band"   (ambiguity A4)
+    absorption : None / "adachi1989" (default model), an object with absorption_coefficient(hv)
+                 [1/m], a scalar absorption length [m], or a callable hv -> length [m]
+    assumptions : ModelAssumptions (initial_spin_rule, initial_k_direction, absorption_model)
+    spin_rule : overrides assumptions.initial_spin_rule
     broadening : apply Eq. 11
-    below_gap_energy : if hw <= Eg, place electrons at this energy [J] (A16; [K13] uses 5 meV).
-    direction : "isotropic" (A3)
+    below_gap_energy : for hv <= Eg(p), place electrons at this energy [J]
 
     Returns
     -------
-    Ensemble with z = z0, t = 0, valley = Gamma, band labels in ``ens.band``.
+    Ensemble with z = z0, valley = Gamma, and band labels in ``ens.band``.
     """
+    assumptions.validate()
+    rule = SPIN_RULE_ALIASES[spin_rule or assumptions.initial_spin_rule]
+    model = as_absorption_model(absorption if absorption is not None else assumptions.absorption_model)
     mat = sample.material
     gv = mat.gamma
-    l_abs = absorption_length(absorption_len, hw)
-    z0 = -l_abs * np.log1p(-rng.random(n))                                  # Eq. 7
+    alpha_abs = float(np.squeeze(model.absorption_coefficient(hw)))
+    if not alpha_abs > 0:
+        raise ValueError(f"absorption model gives alpha = {alpha_abs} at hv = {hw / 1.602176634e-19:.4f} eV "
+                         "(e.g. Adachi 1989 is zero below its E0 = 1.42 eV; gap narrowing is not applied)")
+    z0 = -np.log1p(-rng.random(n)) / alpha_abs                              # Eq. 7
 
     if hw <= sample.Eg:
         if below_gap_energy is None:
-            raise ValueError("photon energy below Eg(p); pass below_gap_energy to override (A16)")
+            raise ValueError("photon energy below Eg(p); pass below_gap_energy to override")
         E0 = np.full(n, float(below_gap_energy))
         band = np.full(n, HH, dtype=np.int8)
         spin = np.where(rng.random(n) < 0.75, 1, -1).astype(np.int8)       # 50% (Eq. 4)
     else:
-        P, K, esp = dp71_weights(sample, hw)
+        w, p_up = band_weights(sample, hw, rule)
         dE = np.array([excess_energy(sample, hw, b) for b in (HH, LH, SO)])
-        if spin_model == "per_band":
-            band = rng.choice(3, size=n, p=K).astype(np.int8)
-            p_up = (1 + P[band]) / 2
-            spin = np.where(rng.random(n) < p_up, 1, -1).astype(np.int8)
-        elif spin_model == "chubenko_text":
-            f_hh = (1 + esp) / 2
-            rest = K[LH] + K[SO]
-            w = np.array([f_hh, (1 - f_hh) * K[LH] / rest, (1 - f_hh) * K[SO] / rest])
-            band = rng.choice(3, size=n, p=w).astype(np.int8)
-            spin = np.where(band == HH, 1, -1).astype(np.int8)
-        else:
-            raise ValueError(spin_model)
+        band = rng.choice(3, size=n, p=w).astype(np.int8)
+        spin = np.where(rng.random(n) < p_up[band], 1, -1).astype(np.int8)
         if np.any(dE[band] <= 0):
             raise RuntimeError("selected an energetically inaccessible band")
         E0 = dE[band].copy()
@@ -157,8 +169,8 @@ def photoexcite(sample, hw, n, rng, absorption_len, spin_model="chubenko_text",
             E_try = E0 + sign * 1.5 * sample.kT * np.log1p(-rng.random(n))
             E0 = np.where(E_try > 0, E_try, E0)
 
-    if direction != "isotropic":
-        raise ValueError(direction)
+    if assumptions.initial_k_direction != "isotropic":
+        raise ValueError(assumptions.initial_k_direction)
     k = bands.random_unit_vectors(n, rng) * bands.k_of_E(E0, gv.m_eff, gv.alpha)[:, None]
     ens = Ensemble.create(z=z0, k=k, E=E0, spin=spin, valley=0)
     ens.band[:] = band

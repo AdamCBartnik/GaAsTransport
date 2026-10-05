@@ -1,18 +1,28 @@
-"""Event-driven ensemble Monte Carlo transport with self-scattering.
+"""Event-driven ensemble Monte Carlo transport.
 
 Every electron is an independent history with its own clock. Each loop iteration advances
-every alive electron by one free flight followed by one scattering event (real or self).
+every alive electron by one free flight followed by one scattering event.
 
-Free flight (standard self-scattering technique):
-    tau = -ln(U) / Gamma0[valley],   Gamma0 >= max_E sum_i W_i(E) over the rate table.
+Free flight (ModelAssumptions.flight_mode):
+  * direct (default when the field is zero): E is constant during the flight, so
+        tau = -ln(U) / W_total(E),   W_total = sum_i W_i(E),
+    is exact and there is no self-scattering. The only null events left are rejections
+    inside a mechanism (e-h Eq. 40, kinematics, Pauli blocking).
+  * self_scattering (required with a field): tau = -ln(U) / Gamma0[valley] with a constant
+    bound Gamma0 >= max_E W_total(E) over the rate table; U*Gamma0 > W_total means self-scattering.
 During the flight, [C21] Eqs. 17-19:
     dz/dt = v_z(k),   hbar dk/dt = -e E_z(z) z_hat.
 Without a field this is exact (z += v_z tau). With a field, kick-drift-kick (velocity-Verlet)
 substeps of at most dt_max are used ([C21] uses 1 fs in the band-bending region).
 
-End of flight: the mechanism is chosen by comparing U * Gamma0 with the cumulative rates at
-the current energy; the remainder is self-scattering. A mechanism may also reject an event
-(e-h Eq. 40, Pauli Eq. 44), which then counts as self-scattering.
+End of flight: the mechanism is chosen by comparing U * G (G = W_total or Gamma0) with the
+cumulative rates at the current energy. A mechanism may also reject an event (e-h Eq. 40,
+kinematics, Pauli), which then counts as self-scattering.
+
+Upper valleys (user decision 4, ModelAssumptions.side_valley_spin = "frozen"): the spin is
+preserved in L and X, with zero additional relaxation. Gamma-valley rates are never applied
+there. The time spent in each valley and whether L or X was ever visited are recorded per
+particle and in every surface-arrival record.
 
 Spin, [C21] Eq. 54: at each *real* event the spin flips with probability
 0.5 (1 - exp(-dt/tau_s(E))), where dt is the time since the previous real event (self-scatterings
@@ -31,6 +41,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from . import bands
+from .assumptions import DEFAULT
 from .constants import EV, FS, HBAR, PS, Q_E
 from .fields import NoField
 from .particle import ALIVE, BACK, SURFACE, TIMEOUT, Ensemble
@@ -66,14 +77,15 @@ class Result:
     n_real: np.ndarray                       # real events per mechanism
     n_self: int
     n_rejected: np.ndarray                   # rejected candidates per mechanism
+    flight_mode: str = "self_scattering"
     event_log: dict = field(default_factory=dict)
 
 
 class Simulation:
     def __init__(self, sample, mechanisms, spin_model=None, field=None, t_max=370 * PS,
                  surface="absorb", z_back=None, E_table_max=2.0 * EV, n_table=4001,
-                 dt_max_field=1 * FS, spin_flip_at_arrival=False, snapshot_times=(),
-                 log_events=False, gamma0_margin=1.02):
+                 dt_max_field=1 * FS, snapshot_times=(), log_events=False, gamma0_margin=1.02,
+                 assumptions=DEFAULT):
         self.sample = sample
         self.material = sample.material
         self.mechanisms = list(mechanisms)
@@ -88,7 +100,14 @@ class Simulation:
         self.surface = surface
         self.z_back = z_back
         self.dt_max = float(dt_max_field)
-        self.spin_flip_at_arrival = spin_flip_at_arrival
+        self.assumptions = assumptions.validate()
+        self.spin_flip_at_arrival = assumptions.spin_flip_at_arrival
+        mode = assumptions.flight_mode
+        if mode == "auto":
+            mode = "direct" if self.field.is_zero else "self_scattering"
+        if mode == "direct" and not self.field.is_zero:
+            raise ValueError("direct W_total(E) flights are only exact without a field")
+        self.flight_mode = mode
         self.snapshot_times = np.sort(np.asarray(snapshot_times, float))
         self.log_events = log_events
         self._build_tables(E_table_max, n_table, gamma0_margin)
@@ -116,7 +135,7 @@ class Simulation:
         for v, idx in enumerate(self.mech_by_valley):
             if idx:
                 self.gamma0[v] = margin * self.rate_table[idx].sum(axis=0).max()
-        # spin relaxation (Gamma valley only; A13 for side valleys)
+        # spin relaxation: Gamma valley only; L/X frozen (zero), see side_valley_spin
         self.inv_tau_s = np.zeros((nv, n))
         if self.spin_model is not None:
             self.inv_tau_s[0] = self.spin_model.total(self.E_grid)
@@ -249,10 +268,13 @@ class Simulation:
             if it > max_iterations:
                 raise RuntimeError("max_iterations exceeded")
             v = ens.valley[idx]
-            G0 = self.gamma0[v]
-            if np.any(G0 <= 0):
+            if np.any(self.gamma0[v] <= 0):
                 raise RuntimeError("an electron is in a valley without mechanisms")
-            tau = -np.log1p(-rng.random(idx.size)) / G0
+            if np.any(ens.E[idx] > self.E_table_max):
+                raise RuntimeError("electron energy left the rate table; raise E_table_max")
+            G = self._flight_rate(ens.E[idx], v)
+            with np.errstate(divide="ignore"):
+                tau = -np.log1p(-rng.random(idx.size)) / G          # G = 0 -> infinite flight
             t0 = ens.t[idx]
             dt = np.minimum(tau, self.t_max - t0)
             timeout = tau >= self.t_max - t0
@@ -264,6 +286,7 @@ class Simulation:
             ens.z[idx], ens.k[idx], ens.E[idx] = z1, k1, E1
             ens.t[idx] = t0 + dt_used
             ens.dt_spin[idx] += dt_used
+            np.add.at(ens.time_in_valley, (idx, v), dt_used)
 
             # --- boundary events
             hit = event == EV_SURFACE
@@ -281,9 +304,7 @@ class Simulation:
             sc = (event == EV_NONE) & ~timeout
             isc = idx[sc]
             if isc.size:
-                if np.any(ens.E[isc] > self.E_table_max):
-                    raise RuntimeError("electron energy left the rate table; raise E_table_max")
-                n_self += self._scatter(ens, isc, rng, n_events, n_real, n_rej, log)
+                n_self += self._scatter(ens, isc, G[sc], rng, n_events, n_real, n_rej, log)
             idx = np.flatnonzero(ens.status == ALIVE)
 
         arr = SurfaceArrivals.concatenate(arrivals, M, self.names)
@@ -292,7 +313,18 @@ class Simulation:
         else:
             log = {}
         return Result(ensemble=ens, arrivals=arr, snapshots=snaps, mechanism_names=self.names,
-                      n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej, event_log=log)
+                      n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej,
+                      flight_mode=self.flight_mode, event_log=log)
+
+    def _flight_rate(self, E, valley):
+        """Rate used to draw the free flight: W_total(E) (direct) or Gamma0 (self-scattering)."""
+        if self.flight_mode == "self_scattering":
+            return self.gamma0[valley]
+        G = np.empty_like(E)
+        for vv in np.unique(valley):
+            sel = valley == vv
+            G[sel] = self.rates_at(E[sel], vv).sum(axis=0)
+        return G
 
     def _spin_flip(self, ens, ii, rng):
         """Eq. 54 for particles ii, with dt = ens.dt_spin; resets dt_spin."""
@@ -310,18 +342,26 @@ class Simulation:
             out[sel] = np.interp(E[sel], self.E_grid, self.inv_tau_s[vv])
         return out
 
-    def _scatter(self, ens, isc, rng, n_events, n_real, n_rej, log):
-        """Choose and apply the scattering event for particles isc. Returns #self-scatterings."""
+    def _scatter(self, ens, isc, G, rng, n_events, n_real, n_rej, log):
+        """Choose and apply the scattering event for particles isc, given the flight rates G
+        used to draw their flights. Returns the number of self-scatterings."""
         n_self = 0
-        for vv in np.unique(ens.valley[isc]):
-            iv = isc[ens.valley[isc] == vv]
+        # freeze pre-event valleys: an electron that transfers valleys inside this loop
+        # must not be scattered again in the destination valley's pass
+        v_before = ens.valley[isc].copy()
+        for vv in np.unique(v_before):
+            in_v = v_before == vv
+            iv = isc[in_v]
             mech_idx = self.mech_by_valley[vv]
             R = self.rates_at(ens.E[iv], vv)                     # (M_v, n)
             cum = np.cumsum(R, axis=0)
-            if np.any(cum[-1] > self.gamma0[vv] * (1 + 1e-9)):
-                raise RuntimeError("total rate exceeds Gamma0; table/margin problem")
-            r = rng.random(iv.size) * self.gamma0[vv]
+            Gv = G[in_v]
+            if np.any(cum[-1] > Gv * (1 + 1e-9)):
+                raise RuntimeError("total rate exceeds the flight rate; table/margin problem")
+            r = rng.random(iv.size) * Gv
             choice = (r[None, :] > cum).sum(axis=0)              # == M_v -> self-scattering
+            if self.flight_mode == "direct":                     # no null events by construction
+                choice = np.minimum(choice, len(mech_idx) - 1)
             n_self += int((choice == len(mech_idx)).sum())
             for j, mi in enumerate(mech_idx):
                 sel = iv[choice == j]
@@ -339,6 +379,7 @@ class Simulation:
                 self._spin_flip(ens, acc, rng)
                 ens.k[acc] = k_new[accepted]
                 ens.valley[acc] = v_new[accepted]
+                ens.visited[acc, ens.valley[acc]] = True
                 m, a = self._valley_params(ens.valley[acc])
                 ens.E[acc] = bands.E_of_k(np.linalg.norm(ens.k[acc], axis=1), m, a)
                 if not np.all(np.isfinite(ens.E[acc])):
@@ -377,4 +418,6 @@ class Simulation:
             t=ens.t[ih].copy(), E=ens.E[ih].copy(), k=ens.k[ih].copy(), valley=ens.valley[ih].copy(),
             spin=ens.spin[ih].copy(), spin0=ens.spin0[ih].copy(), z0=ens.z0[ih].copy(),
             E0=ens.E0[ih].copy(), band=ens.band[ih].copy(), n_flips=ens.n_flips[ih].copy(),
-            n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(), mechanism_names=self.names)
+            n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
+            time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
+            mechanism_names=self.names)

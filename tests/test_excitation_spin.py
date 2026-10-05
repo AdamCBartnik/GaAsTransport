@@ -35,12 +35,12 @@ def test_esp0_intrinsic_vs_fig6():
     assert 0.06 < excitation.esp0(s, ev(2.20)) < 0.10
 
 
-@pytest.mark.parametrize("model", ["per_band", "chubenko_text"])
+@pytest.mark.parametrize("model", ["per_band", "chubenko_prose"])
 def test_sampled_esp_matches_eq12(model):
     s = Sample(MAT, per_cm3(1e19))
     rng = np.random.default_rng(5)
     for hw in (1.45, 1.75, 1.9):
-        ens = excitation.photoexcite(s, ev(hw), 200_000, rng, 500 * NM, spin_model=model)
+        ens = excitation.photoexcite(s, ev(hw), 200_000, rng, 500 * NM, spin_rule=model)
         assert abs(ens.esp() - excitation.esp0(s, ev(hw))) < 0.01
 
 
