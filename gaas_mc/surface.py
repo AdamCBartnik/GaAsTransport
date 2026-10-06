@@ -44,6 +44,7 @@ class SurfaceArrivals:
     eqv: np.ndarray = None              # int8: which equivalent valley (see gaas_mc/valleys.py)
     K: np.ndarray = None                # (n, 3) full crystal wavevector = valley center + k [1/m]
     band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
+    n_back: np.ndarray = None           # back-boundary encounters before the arrival (finite layers)
     mechanism_names: tuple = ()
 
     @property
@@ -85,6 +86,7 @@ class SurfaceArrivals:
                    n_events=np.zeros((0, n_mech), np.int32), pid=np.zeros(0, int),
                    time_in_valley=np.zeros((0, 3)), visited=np.zeros((0, 3), bool),
                    eqv=np.zeros(0, np.int8), K=np.zeros((0, 3)), dt_spin=np.zeros(0),
+                   n_back=np.zeros(0, np.int32),
                    mechanism_names=tuple(names))
 
     @classmethod
@@ -95,7 +97,8 @@ class SurfaceArrivals:
         for f in fields(cls):
             if f.name in ("mechanism_names", "band_edge_at_surface"):
                 continue
-            out[f.name] = np.concatenate([getattr(p, f.name) for p in parts])
+            vals = [getattr(p, f.name) for p in parts]
+            out[f.name] = None if any(v is None for v in vals) else np.concatenate(vals)
         return cls(**out, band_edge_at_surface=parts[0].band_edge_at_surface, mechanism_names=tuple(names))
 
     def to_host(self):
@@ -103,7 +106,8 @@ class SurfaceArrivals:
         return type(self)(**out)
 
     def save_npz(self, path):
-        d = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "mechanism_names"}
+        d = {f.name: getattr(self, f.name) for f in fields(self)
+             if f.name != "mechanism_names" and getattr(self, f.name) is not None}
         d["band_edge_at_surface"] = np.array(self.band_edge_at_surface)
         np.savez_compressed(path, mechanism_names=np.array(self.mechanism_names), **d)
 
@@ -134,6 +138,7 @@ class Emissions:
     pid: np.ndarray
     p_vac: np.ndarray        # (n, 3) momentum in vacuum [kg m/s] (p_z < 0: leaving toward -z)
     E_vac: np.ndarray        # kinetic energy in vacuum above the vacuum level [J]
+    n_back: np.ndarray = None   # back-boundary encounters before the emission (finite layers)
 
     def __len__(self):
         return self.t.size
@@ -157,5 +162,9 @@ class Emissions:
             return cls(t=z, E=z, k=np.zeros((0, 3)), K=np.zeros((0, 3)), valley=np.zeros(0, np.int8),
                        eqv=np.zeros(0, np.int8), spin=np.zeros(0, np.int8), spin0=np.zeros(0, np.int8),
                        z0=z, E0=z, band=np.zeros(0, np.int8), n_surface=np.zeros(0, np.int32),
-                       pid=np.zeros(0, int), p_vac=np.zeros((0, 3)), E_vac=z)
-        return cls(**{f.name: np.concatenate([getattr(q, f.name) for q in parts]) for f in fields(cls)})
+                       pid=np.zeros(0, int), p_vac=np.zeros((0, 3)), E_vac=z, n_back=np.zeros(0, np.int32))
+        out = {}
+        for f in fields(cls):
+            vals = [getattr(q, f.name) for q in parts]
+            out[f.name] = None if any(v is None for v in vals) else np.concatenate(vals)
+        return cls(**out)

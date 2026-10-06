@@ -5,6 +5,11 @@ or multielectron processes; delta-function pulse at t = 0.
 
 Depth, Eq. 7:   z0 = -l ln(1 - r)      (l = absorption length; R does not affect the depth
                                          distribution, only the normalization of QE)
+  Finite layer 0 < z < d (thickness=d; Stage F, no optical interference): Beer-Lambert truncated
+  to the layer, P(z | absorbed in the layer) = alpha exp(-alpha z) / (1 - exp(-alpha d)), sampled as
+                  z0 = -l ln(1 - r (1 - exp(-d/l)));
+  the fraction of incident photons absorbed in the layer is layer_absorption() =
+  (1 - R) (1 - exp(-alpha d)) (QE = layer_absorption x N_emitted / N_generated).
 Energy, Eqs. 8-9 (energy + momentum conservation for a vertical transition from band h):
     dE_e = hw - Eg - (dE_h + Delta)
     dE_h = Gamma2/(2 alpha) [1 - sqrt(1 - 4 alpha (1 + alpha Gamma1) Gamma1 / Gamma2^2)]
@@ -124,8 +129,22 @@ def band_weights(sample, hw, rule):
     return w, np.array([1.0, 0.0, 0.0])
 
 
+def layer_absorption(sample, hw, thickness=None, absorption=None, assumptions=DEFAULT):
+    """Fraction of the incident photons absorbed in the GaAs: (1 - R) for a semi-infinite sample,
+    (1 - R)(1 - exp(-alpha d)) for a layer of thickness d (no interference, no back reflection of
+    the light). R is the Adachi (1989) reflectivity used throughout."""
+    from .optics import Adachi1989GaAs
+    model = as_absorption_model(absorption if absorption is not None else assumptions.absorption_model,
+                                sample)
+    alpha = float(np.squeeze(model.absorption_coefficient(hw)))
+    R = float(Adachi1989GaAs().reflectivity(hw))
+    if thickness is None:
+        return 1.0 - R
+    return (1.0 - R) * float(-np.expm1(-alpha * float(thickness)))
+
+
 def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_rule=None,
-                broadening=True, below_gap_energy=None):
+                broadening=True, below_gap_energy=None, thickness=None):
     """Generate n photoexcited electrons in the Gamma valley at t = 0.
 
     Parameters
@@ -141,6 +160,8 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     spin_rule : overrides assumptions.initial_spin_rule
     broadening : apply Eq. 11
     below_gap_energy : for hv <= Eg(p), place electrons at this energy [J]
+    thickness : None (semi-infinite) or the layer thickness d [m]: depths from the Beer-Lambert
+                distribution truncated to 0 < z < d
 
     Returns
     -------
@@ -160,7 +181,15 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     alpha_abs = float(np.squeeze(model.absorption_coefficient(hw)))
     if not (np.isfinite(alpha_abs) and alpha_abs > 0):
         raise ValueError(f"absorption model returned alpha = {alpha_abs} at hv = {hw / EV:.4f} eV")
-    z0 = -np.log1p(-rng.random(n)) / alpha_abs                              # Eq. 7
+    if thickness is None:
+        z0 = -np.log1p(-rng.random(n)) / alpha_abs                          # Eq. 7
+    else:
+        d = float(thickness)
+        if not d > 0:
+            raise ValueError(f"thickness = {d} must be positive")
+        frac = -np.expm1(-alpha_abs * d)                                  # 1 - exp(-alpha d)
+        z0 = -np.log1p(-rng.random(n) * frac) / alpha_abs                 # truncated to (0, d)
+        z0 = np.minimum(z0, d)
 
     if hw <= sample.Eg:
         E0 = np.full(n, float(below_gap_energy))

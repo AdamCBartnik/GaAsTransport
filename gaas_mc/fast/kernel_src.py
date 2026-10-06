@@ -377,7 +377,7 @@ def propagate_free(z, kz, E, m, a, dt, icfg, cfg):
         z1 = zf
     if event == EV_BACK:
         z1 = zb
-        if icfg[I_BACK] == 1:
+        if icfg[I_BACK] == 1:                 # legacy specular wall (no encounter bookkeeping)
             kz = -kz
             event = EV_WALL
     if icfg[I_SURFACE] == 1 and event == EV_SURFACE:
@@ -387,15 +387,16 @@ def propagate_free(z, kz, E, m, a, dt, icfg, cfg):
 
 
 @jit
-def surface_crossing_time(z_old, kx, ky, kz, m, a, h, h_lin, ftype, fpar, icfg, cfg):
-    """Simulation._surface_crossing_time: smallest root in [0, h] of z_old + v t + a_z t^2 / 2 = 0
+def surface_crossing_time(z_old, kx, ky, kz, m, a, h, h_lin, zb, ftype, fpar, icfg, cfg):
+    """Simulation._surface_crossing_time: smallest root in [0, h] of z_old - zb + v t + a_z t^2/2 = 0
     (force at z_old, velocity mass); linear interpolation h_lin if there is none."""
     E0 = E_of_k(math.sqrt(kx * kx + ky * ky + kz * kz), m, a)
     mv = m * (1.0 + 2.0 * a * E0)
     v = HBAR * kz / mv
     acc = -Q_E * Ez_ext(z_old, ftype, fpar, icfg, cfg) / mv
     A2 = 0.5 * acc
-    D = v * v - 4.0 * A2 * z_old
+    c0 = z_old - zb
+    D = v * v - 4.0 * A2 * c0
     if D < 0.0:
         return h_lin
     sq = math.sqrt(D)
@@ -407,7 +408,7 @@ def surface_crossing_time(z_old, kx, ky, kz, m, a, h, h_lin, ftype, fpar, icfg, 
         if t1 >= 0.0 and t1 <= hmax and t1 < best:
             best = t1
     if q != 0.0:
-        t2 = z_old / q
+        t2 = c0 / q
         if t2 >= 0.0 and t2 <= hmax and t2 < best:
             best = t2
     if not math.isfinite(best):
@@ -416,18 +417,19 @@ def surface_crossing_time(z_old, kx, ky, kz, m, a, h, h_lin, ftype, fpar, icfg, 
 
 
 @jit
-def surface_crossing_kz(z_old, kx, ky, kz_old, kc, m, a, ftype, fpar):
-    """Simulation._surface_crossing_k: k_z < 0 at the surface from total-energy conservation (k_par
-    unchanged); the integrator's kc if there is no solution."""
+def surface_crossing_kz(z_old, kx, ky, kz_old, kc, m, a, zb, sign, ftype, fpar):
+    """Simulation._surface_crossing_k: k_z (sign: -1 at the surface zb = 0, +1 at the back) at the
+    boundary from total-energy conservation (k_par unchanged); the integrator's kc if there is no
+    solution."""
     E0 = E_of_k(math.sqrt(kx * kx + ky * ky + kz_old * kz_old), m, a)
     zz = z_old if z_old > 0.0 else 0.0
-    Es = E0 + field_band_edge(zz, ftype, fpar) - field_band_edge(0.0, ftype, fpar)
+    Es = E0 + field_band_edge(zz, ftype, fpar) - field_band_edge(zb, ftype, fpar)
     if Es < 0.0:
         Es = 0.0
     kt = k_of_E(Es, m, a)
     kz2 = kt * kt - kx * kx - ky * ky
     if kz2 > 0.0:
-        return -math.sqrt(kz2)
+        return sign * math.sqrt(kz2)
     return kc
 
 
@@ -464,7 +466,7 @@ def propagate_field(z, kx, ky, kz, E, m, a, dt, ftype, fpar, icfg, cfg):
             z_new = 2.0 * zb - z_new
             kz_new = -kz_new
         cross_s = icfg[I_SURFACE] == 0 and z_new <= 0.0
-        cross_b = icfg[I_HAS_BACK] == 1 and icfg[I_BACK] == 0 and z_new >= zb
+        cross_b = icfg[I_HAS_BACK] == 1 and icfg[I_BACK] != 1 and z_new >= zb
         cross_r = has_zr and z_new >= zf and not cross_b
         if cross_s or cross_b or cross_r:
             if cross_s:
@@ -479,11 +481,14 @@ def propagate_field(z, kx, ky, kz, E, m, a, dt, ftype, fpar, icfg, cfg):
             if f > 1.0:
                 f = 1.0
             hc = h * f
-            if cross_s:
-                hc = surface_crossing_time(z_old, kx, ky, kz_old, m, a, h, hc, ftype, fpar, icfg, cfg)
+            if cross_s or cross_b:
+                hc = surface_crossing_time(z_old, kx, ky, kz_old, m, a, h, hc, zbd, ftype, fpar, icfg,
+                                           cfg)
             _, kc = kdk(z_old, kx, ky, kz_old, m, a, hc, ftype, fpar, icfg, cfg)
             if cross_s:
-                kc = surface_crossing_kz(z_old, kx, ky, kz_old, kc, m, a, ftype, fpar)
+                kc = surface_crossing_kz(z_old, kx, ky, kz_old, kc, m, a, 0.0, -1.0, ftype, fpar)
+            elif cross_b:
+                kc = surface_crossing_kz(z_old, kx, ky, kz_old, kc, m, a, zb, 1.0, ftype, fpar)
             z_new = zbd
             kz_new = kc
             h = hc
@@ -918,6 +923,7 @@ def record_arrival(i, fs, ist, tiv, vis, n_events, has_arr, arr_f, arr_i, arr_vi
         arr_vis[i, c] = vis[i, c]
     for c in range(5):
         arr_i[i, c] = ist[i, c]
+    arr_i[i, 5] = ist[i, 6]                              # back-boundary encounters
     for c in range(n_events.shape[1]):
         arr_ev[i, c] = n_events[i, c]
 
@@ -958,6 +964,7 @@ def emit(i, fs, ist, branch, em_f, em_i, voff, surf_par, cfg):
     em_i[i, 1] = ist[i, 1]
     em_i[i, 2] = ist[i, 2]
     em_i[i, 3] = ist[i, 5]
+    em_i[i, 4] = ist[i, 6]
     ist[i, 3] = EMITTED
 
 
@@ -1070,7 +1077,7 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
     """Advance electron i by up to `budget` flights (the body of the Simulation.run loop for one
     electron). Stops at time-out, back contact, a final surface outcome, an error, or (surface
     mode 0) at a surface encounter with status PENDING for the host. fs columns: z, t, kx, ky, kz,
-    E, dt_spin. ist columns: valley, eqv, spin, status, n_flips, n_surface."""
+    E, dt_spin. ist columns: valley, eqv, spin, status, n_flips, n_surface, n_back."""
     t_max = cfg[C_TMAX]
     if start[i] == 1:                                    # start_at_surface (no arrival spin test)
         start[i] = 0
@@ -1138,7 +1145,12 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
             encounter(i, fs, ist, tiv, vis, n_events, branch, has_arr, arr_f, arr_i, arr_vis, arr_ev,
                       em_f, em_i, last_T, rng, vpar, voff, surf_par, surf_V, cfg, icfg)
             continue                          # reflected electrons fly on; others stop above
-        if event == EV_BACK:
+        if event == EV_BACK:                  # back boundary z = d (Simulation._back_interaction)
+            ist[i, 6] += 1
+            if icfg[I_BACK] == 2 and rand(rng, i) < cfg[C_RBACK]:
+                fs[i, 4] = -abs(fs[i, 4])     # specular reflection into the layer
+                fs[i, 0] = cfg[C_ZBACK]
+                continue
             ist[i, 3] = BACK
             return
         if event != EV_NONE:                  # EV_REGION / EV_WALL: next flight, no scattering

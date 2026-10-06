@@ -37,6 +37,7 @@ class Ensemble:
     visited: np.ndarray          # (n, 3) bool, valley ever occupied
     eqv: np.ndarray              # int8: which equivalent valley (L: 0-3, X: 0-2, Gamma: 0), see valleys.py
     n_surface: np.ndarray        # number of surface encounters
+    n_back: np.ndarray           # number of back-boundary (z = z_back) encounters
 
     @classmethod
     def create(cls, z, k, E, spin, valley=0, t=0.0):
@@ -52,7 +53,7 @@ class Ensemble:
             band=np.full(n, -1, np.int8), dt_spin=np.zeros(n), n_flips=np.zeros(n, np.int32),
             pid=np.arange(n), time_in_valley=np.zeros((n, 3)),
             visited=np.eye(3, dtype=bool)[np.full(n, valley)], eqv=np.zeros(n, np.int8),
-            n_surface=np.zeros(n, np.int32),
+            n_surface=np.zeros(n, np.int32), n_back=np.zeros(n, np.int32),
         )
 
     @classmethod
@@ -64,7 +65,8 @@ class Ensemble:
                    spin=arr.spin.copy(), status=np.full(n, ALIVE, np.int8), z0=arr.z0.copy(),
                    E0=arr.E0.copy(), spin0=arr.spin0.copy(), band=arr.band.copy(), dt_spin=arr.dt_spin.copy(),
                    n_flips=arr.n_flips.copy(), pid=arr.pid.copy(), time_in_valley=arr.time_in_valley.copy(),
-                   visited=arr.visited.copy(), eqv=arr.eqv.copy(), n_surface=np.zeros(n, np.int32))
+                   visited=arr.visited.copy(), eqv=arr.eqv.copy(), n_surface=np.zeros(n, np.int32),
+                   n_back=(arr.n_back.copy() if arr.n_back is not None else np.zeros(n, np.int32)))
 
     def __len__(self):
         return self.z.size

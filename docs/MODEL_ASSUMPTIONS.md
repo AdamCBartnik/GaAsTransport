@@ -266,6 +266,21 @@ same interface can replace it. The bulk Monte Carlo is unchanged.
 | Repeated returns | A reflected electron pushed back by the surface field returns after t_ret = 2ħk_z/\|F(0)\| with the same state, i.e. the same transmission trial. Both engines book the floor(dt/t_ret) returns of one flight at once (geometric number of failed trials before an emission): exact in distribution, and necessary because grazing electrons (k_z → 0) need ~1/(Γ0 t_ret) returns (~1e9 observed). `surface_bounce_aggregation=False` restores one return per iteration (tests). The encounter counter saturates at 2³¹−1; its mean is dominated by these electrons, so medians and percentiles are reported. |
 | Matching mass: evidence | Fig. 18 benchmark (`docs/VALIDATION.md`): with `matching_mass="band_edge"` the computed QE agrees with C21 to a few % at every χ and hν; with the velocity mass it is 25–50 % higher. This indicates what C21 did; it is not a physical argument for either choice. The band-edge mass is therefore the default of the C21 surface model; the velocity mass stays as an option. |
 
+## 6e. Finite GaAs layer (Stage F, `gaas_mc/back.py`, `photoexcite(..., thickness=d)`)
+
+User request of 2026-10-06: the smallest extension toward thin active layers. The layer is
+0 < z < d; z = 0 is the emitting surface (electrons leave toward −z, as before), z = d is the
+GaAs/substrate boundary.
+
+| Item | Choice |
+|---|---|
+| Material | GaAs everywhere in 0 < z < d with the unchanged physics: same scattering, the semi-infinite C21 band-bending profile at the front, no back-interface potential, no substrate transport. A warning is issued when d < 3 W_bb (the electrostatic profile is then not self-consistent; not corrected). |
+| Back boundary | `Simulation(..., z_back=d, back=PartialReflector(R_back))`. The flight stops at z = d (exact crossing time and energy-conserving state, as at the front surface). One random decision per encounter: reflected with probability R_back (k_z → −k_z; energy, k_x, k_y, valley, equivalent valley and spin unchanged), otherwise lost into the substrate (status `BACK`). R_back = 0: absorbing substrate; R_back = 1: perfectly reflecting back surface. |
+| Records | `Ensemble.n_back` (back encounters; reached the back ⇔ n_back > 0; lost ⇔ status BACK), also in `SurfaceArrivals.n_back` and `Emissions.n_back`. |
+| Generation | Beer–Lambert truncated to the layer, P(z) = α e^(−αz)/(1 − e^(−αd)); fraction of incident photons absorbed in the layer `layer_absorption()` = (1 − R)(1 − e^(−αd)); QE = A_layer·N_emitted/N_generated. No optical interference, no reflection of light at z = d. |
+| Modularity | The back boundary is an object with `interact(k, E, valley, rng, pid) → reflected?`, the counterpart of the surface model; a physical GaAs/AlGaAs interface model can replace `PartialReflector`. The fast engine compiles `PartialReflector`; other back models currently need the reference engine. |
+| Not supported | A field that pushes electrons into the back boundary (repeated back returns would need the bounce aggregation of the front surface); raises. The C21 band bending always pushes toward z = 0. The legacy `back="reflect"` (mirror wall, closed-slab tests) and `back="absorb"` are unchanged. |
+
 ## 6. Other
 
 | Field | Default | Note |

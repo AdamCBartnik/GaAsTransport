@@ -25,6 +25,7 @@ surface model (Stage E) is available as an optional, replaceable module for benc
 | C | L, X valleys; intervalley (Eq. 33, DOS factor in numerator); spin frozen in L/X with residence-time bookkeeping | done, validated |
 | D | C21 band bending (Eqs. 56–62); user potentials; hybrid direct / null-collision flights; adaptive Verlet step | done, validated |
 | D′ | Depletion region: local mobile holes (global E_F), local screening of impurity/POP/e–h, local BAP; valley identity + full crystal momentum at arrival | done, validated |
+| F | minimal finite GaAs layer 0 < z < d: probabilistic back boundary (`PartialReflector(R_back)`), truncated Beer–Lambert generation, layer absorption; whole layer GaAs | done, tests + thickness study |
 | E | optional C21 surface model (`surface_c21.py`): triangular barrier, transfer matrix, m*→m0, (001) K∥ conservation, trapping, reflection; Fig. 18 benchmark | done, benchmark in `docs/VALIDATION.md` |
 
 ## Running

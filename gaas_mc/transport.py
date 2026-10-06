@@ -38,9 +38,14 @@ Boundaries:
     surface = "absorb"  stop at z = 0 and store a SurfaceArrivals record (default)
               "reflect" specular reflection k_z -> -k_z (e.g. internal-ESP studies, Eq. 55)
               "none"    no boundary (infinite homogeneous medium)
-    z_back  : optional back boundary at z = z_back (thin films): back = "absorb" (status BACK) or
-              "reflect" (specular; the flight stops at the wall, k_z flips, and the next flight
-              follows, which is exact by memorylessness).
+    z_back  : optional back boundary at z = z_back (finite GaAs layer 0 < z < d, d = z_back):
+              back = "absorb" (status BACK); "reflect" (specular mirror wall, as in the closed-slab
+              tests); or a back-boundary model (gaas_mc/back.py, e.g. PartialReflector(R_back)):
+              the flight stops at z = d, the model decides once per encounter between specular
+              reflection (k_z -> -k_z; energy, k_par, valley and spin unchanged) and loss into the
+              substrate (status BACK). Back encounters are counted in Ensemble.n_back ("absorb" and
+              back models). The rest of the physics is unchanged (whole layer = GaAs, semi-infinite
+              band-bending profile: a warning is issued when d < 3 W_bb).
 dt_max_field: velocity-Verlet substep in the field region. Default (None): h = min(2 fs, 0.05/omega),
               omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
               C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
@@ -134,6 +139,12 @@ class Simulation:
             raise ValueError(surface)
         self.surface = surface
         self.z_back = z_back
+        # back: "absorb" | "reflect" | a back-boundary model with interact(k, E, valley, rng, pid)
+        self.back_model = back if getattr(back, "is_back_model", False) else None
+        if self.back_model is not None:
+            if z_back is None:
+                raise ValueError("a back-boundary model needs z_back")
+            back = "absorb"                         # geometry: stop at z = z_back, then ask the model
         if back not in ("absorb", "reflect"):
             raise ValueError(back)
         self.back = back
@@ -157,6 +168,22 @@ class Simulation:
         if self.depl is not None and self.depl.field is not self.field:
             raise ValueError("the mechanisms' depletion model was built for a different field")
         self._build_tables(E_table_max, n_table, gamma0_margin)
+        self._check_back_boundary()
+
+    def _check_back_boundary(self):
+        if self.z_back is None:
+            return
+        import warnings
+        zmax = float(getattr(self.field, "z_max", 0.0))
+        if 0 < zmax < np.inf and self.z_back < 3 * zmax:
+            warnings.warn(f"layer thickness {self.z_back * 1e9:.1f} nm is comparable to or smaller than "
+                          f"the band-bending width {zmax * 1e9:.1f} nm: the semi-infinite electrostatic "
+                          "profile is no longer self-consistent (not corrected)", stacklevel=3)
+        if self.back_model is not None and not self.field.is_zero:
+            F = -Q_E * float(self.field.Ez(np.array([float(self.z_back)]))[0])
+            if F > 0:
+                raise NotImplementedError("the field pushes electrons into the back boundary; repeated "
+                                          "back returns are not handled (C21 band bending never does this)")
 
     def _auto_field_step(self, eta=0.05, cap=2 * FS):
         if self.field.is_zero:
@@ -346,7 +373,7 @@ class Simulation:
         k[:, 2] += 0.5 * F * h / HBAR
         return z, k
 
-    def _surface_crossing_time(self, z_old, k_old, m, a, h, h_lin):
+    def _surface_crossing_time(self, z_old, k_old, m, a, h, h_lin, zb=0.0):
         """Time to reach z = 0 within a substep that crosses the surface. Linear interpolation in z
         is badly biased for short arcs near the surface (an electron near the top of an arc of
         duration << h): it underestimates the crossing time, hence |k_z| at the surface, and
@@ -357,7 +384,7 @@ class Simulation:
         mv = m * (1 + 2 * a * E0)
         v = HBAR * k_old[:, 2] / mv
         acc = -Q_E * self._Ez_ext(z_old) / mv
-        A2, B, Cc = 0.5 * acc, v, z_old
+        A2, B, Cc = 0.5 * acc, v, z_old - zb
         with np.errstate(invalid="ignore", divide="ignore"):
             D = B * B - 4 * A2 * Cc
             sq = np.sqrt(np.where(D >= 0, D, 0.0))
@@ -370,17 +397,18 @@ class Simulation:
             ok = (D >= 0) & np.isfinite(t)
         return np.where(ok, np.minimum(t, h), h_lin)
 
-    def _surface_crossing_k(self, z_old, k_old, kc, m, a, sel):
-        """k at the surface crossing (rows sel): k_par unchanged, |k_z| from total-energy
-        conservation E(z_old) + E_C(z_old) = E(0) + E_C(0) (exact, independent of the step), k_z < 0.
-        Keeps the integrator's value where energy conservation has no solution."""
+    def _surface_crossing_k(self, z_old, k_old, kc, m, a, sel, zb=0.0, sign=-1.0):
+        """k at a boundary crossing (rows sel; surface: zb = 0, k_z < 0; back: zb = z_back, k_z > 0):
+        k_par unchanged, |k_z| from total-energy conservation E(z_old) + E_C(z_old) = E(zb) + E_C(zb)
+        (exact, independent of the step). Keeps the integrator's value where energy conservation has
+        no solution."""
         E0 = bands.E_of_k(np.linalg.norm(k_old, axis=1), m, a)
-        Es = E0 + self.field.band_edge(np.maximum(z_old, 0.0)) - self.field.band_edge(0.0 * z_old)
+        Es = E0 + self.field.band_edge(np.maximum(z_old, 0.0)) - self.field.band_edge(0.0 * z_old + zb)
         kt2 = bands.k_of_E(np.maximum(Es, 0.0), m, a) ** 2
         kz2 = kt2 - k_old[:, 0] ** 2 - k_old[:, 1] ** 2
         use = sel & (kz2 > 0)
         kc = kc.copy()
-        kc[use, 2] = -np.sqrt(kz2[use])
+        kc[use, 2] = sign * np.sqrt(kz2[use])
         return kc
 
     def _propagate_field(self, z, k, E, m, a, dt):
@@ -436,10 +464,16 @@ class Simulation:
                 hc = h * f
                 if np.any(cross_s):
                     hc = np.where(cross_s, self._surface_crossing_time(z_old, k_old, m[ia], a[ia], h, hc), hc)
+                if np.any(cross_b):
+                    hc = np.where(cross_b, self._surface_crossing_time(z_old, k_old, m[ia], a[ia], h, hc,
+                                                                      float(self.z_back)), hc)
                 _, kc = self._kdk(z_old[cr].copy(), k_old[cr].copy(), m[ia][cr], a[ia][cr], hc[cr])
                 if np.any(cross_s):
                     kc = self._surface_crossing_k(z_old[cr], k_old[cr], kc, m[ia][cr], a[ia][cr],
                                                   cross_s[cr])
+                if np.any(cross_b):
+                    kc = self._surface_crossing_k(z_old[cr], k_old[cr], kc, m[ia][cr], a[ia][cr],
+                                                  cross_b[cr], float(self.z_back), +1.0)
                 z_new[cr] = zb[cr]
                 k_new[cr] = kc
                 h = np.where(cr, hc, h)
@@ -555,7 +589,9 @@ class Simulation:
                     ens.status[ih] = SURFACE
                 else:
                     self._surface_interaction(ens, ih, rng, emissions, last_T)
-            ens.status[idx[event == EV_BACK]] = BACK
+            ib = idx[event == EV_BACK]
+            if ib.size:
+                self._back_interaction(ens, ib, rng)
             # EV_REGION / EV_WALL: the flight stopped at the field boundary or reflected off the back
             # wall; there is no scattering event, and the next flight follows
             done_t = timeout & (event == EV_NONE)
@@ -600,13 +636,26 @@ class Simulation:
         if last_T is not None and "T" in info:
             last_T[rf] = info["T"][refl]
 
+    def _back_interaction(self, ens, ib, rng):
+        """Electrons ib at z = z_back: count the encounter; lost (status BACK) or, with a back model,
+        reflected specularly (k_z -> -k_z, everything else unchanged) with the model's probability."""
+        ens.n_back[ib] += 1
+        if self.back_model is None:
+            ens.status[ib] = BACK
+            return
+        refl = self.back_model.interact(ens.k[ib], ens.E[ib], ens.valley[ib], rng, pid=ens.pid[ib])
+        rf = ib[refl]
+        ens.k[rf, 2] = -np.abs(ens.k[rf, 2])           # back into the layer (-z)
+        ens.z[rf] = float(self.z_back)
+        ens.status[ib[~refl]] = BACK
+
     def _record_emission(self, ens, ie, K, p_vac, E_vac, emissions):
         emissions.append(Emissions(
             t=ens.t[ie].copy(), E=ens.E[ie].copy(), k=ens.k[ie].copy(), K=K.copy(),
             valley=ens.valley[ie].copy(), eqv=ens.eqv[ie].copy(), spin=ens.spin[ie].copy(),
             spin0=ens.spin0[ie].copy(), z0=ens.z0[ie].copy(), E0=ens.E0[ie].copy(),
             band=ens.band[ie].copy(), n_surface=ens.n_surface[ie].copy(), pid=ens.pid[ie].copy(),
-            p_vac=p_vac.copy(), E_vac=E_vac.copy()))
+            p_vac=p_vac.copy(), E_vac=E_vac.copy(), n_back=ens.n_back[ie].copy()))
         ens.status[ie] = EMITTED
 
     def _bounce_trains(self, ens, idx, v, inside, lt, dt, rng, emissions):
@@ -787,7 +836,7 @@ class Simulation:
             E0=ens.E0[ih].copy(), band=ens.band[ih].copy(), n_flips=ens.n_flips[ih].copy(),
             n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
             time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
-            eqv=ens.eqv[ih].copy(), dt_spin=ens.dt_spin[ih].copy(),
+            eqv=ens.eqv[ih].copy(), dt_spin=ens.dt_spin[ih].copy(), n_back=ens.n_back[ih].copy(),
             K=ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat),
             band_edge_at_surface=float(self.field.band_edge(np.array([0.0]))[0]),
             mechanism_names=self.names)

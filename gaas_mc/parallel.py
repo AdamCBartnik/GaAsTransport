@@ -165,10 +165,12 @@ def save_result(res, path):
     d = {f"ens_{f.name}": getattr(res.ensemble, f.name) for f in fields(res.ensemble)}
     for f in fields(res.arrivals):
         v = getattr(res.arrivals, f.name)
-        d[f"arr_{f.name}"] = np.asarray(v)
+        if v is not None:
+            d[f"arr_{f.name}"] = np.asarray(v)
     if res.emissions is not None:
         for f in fields(res.emissions):
-            d[f"em_{f.name}"] = getattr(res.emissions, f.name)
+            if getattr(res.emissions, f.name) is not None:
+                d[f"em_{f.name}"] = getattr(res.emissions, f.name)
     if res.snapshots is not None:
         for k in ("times", "E", "z", "spin", "valley"):
             d[f"snap_{k}"] = getattr(res.snapshots, k)

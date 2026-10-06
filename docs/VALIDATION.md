@@ -231,3 +231,40 @@ C21's ESP rises steeply with χ (at 1.6 eV: 26 % for χ ≤ 0.70, 33 % for χ = 
   band-bending region before the surface, C21's 1 fs Verlet step (≈ 2 meV energy error per crossing),
   and the exact absorption depth profile. Fermi–Dirac blocking stays the default (it is the
   physically consistent choice); `bulk_step` is kept as a documented sensitivity variant.
+
+## Stage F: minimal finite GaAs layer (`tests/test_thin_film.py`, `validation/stage_f_thin_film.py`)
+
+**Tests:** back reflection with R_back = 1 conserves energy (round-off for field-free flights;
+Verlet tolerance < 0.05 meV inside the field), flips k_z and leaves k_par, valley and spin unchanged;
+a closed slab with many back reflections shows no heating, cooling or density drift (both engines);
+R_back = 0 terminates every electron reaching z = d exactly once; R_back = 0.7 is reproduced as the
+reflected fraction of > 5000 encounters; the generated depths follow the truncated exponential (KS);
+d = 20 µm reproduces the semi-infinite result; the d < 3 W_bb warning fires.
+
+**Thickness study** (p = 1e19, χ = 0.67 eV, C21 baseline physics, Adachi absorption, 10⁵ electrons per
+point, GPU; `validation/out/stageF/thin_film_summary.txt`, `thin_film.png`):
+
+| hν | d | R_back | QE % | ESP % | median t_emit (ps) | lost to substrate |
+|---|---|---|---|---|---|---|
+| 1.55 | 100 nm | 0 / 0.5 / 1 | 0.86 / 0.95 / 1.65 | 47.6 / 47.1 / 44.0 | 0.3 / 0.4 / 1.8 | 0.47 / 0.41 / 0 |
+| 1.55 | 200 nm | 0 / 0.5 / 1 | 1.64 / 1.74 / 3.10 | 46.4 / 45.1 / 39.9 | 1.7 / 1.9 / 8.2 | 0.46 / 0.44 / 0 |
+| 1.55 | 500 nm | 0 / 0.5 / 1 | 3.56 / 3.59 / 6.25 | 36.3 / 38.1 / 26.4 | 11.9 / 12.1 / 42.5 | 0.44 / 0.43 / 0 |
+| 1.55 | semi-infinite | – | 6.31 | 25.2 | 46.6 | – |
+| 1.80 | 100 nm | 0 / 0.5 / 1 | 1.63 / 1.83 / 2.96 | 23.7 / 24.2 / 20.2 | 0.3 / 0.3 / 1.0 | 0.47 / 0.40 / 0 |
+| 1.80 | 200 nm | 0 / 0.5 / 1 | 2.84 / 3.02 / 5.04 | 21.0 / 21.2 / 18.4 | 1.0 / 1.1 / 5.0 | 0.46 / 0.42 / 0 |
+| 1.80 | 500 nm | 0 / 0.5 / 1 | 5.42 / 5.53 / 8.65 | 14.2 / 16.4 / 11.9 | 7.4 / 7.2 / 31.4 | 0.40 / 0.39 / 0 |
+| 1.80 | semi-infinite | – | 8.32 | 11.3 | 26.2 | – |
+
+σ(QE) ≤ 0.07 % abs., σ(ESP) ≈ 0.7–1 % abs.
+
+* Thin layers trade QE for speed and polarization: at 100–200 nm almost all emission happens within
+  ~10 ps and the ESP is that of the early electrons (≈ 45–48 % at 1.55 eV against 25 % for the
+  semi-infinite sample). QE per absorbed photon is roughly unchanged at R_back = 0 (about 45 % of the
+  electrons are lost to the substrate, while the semi-infinite sample loses a similar share to the
+  370 ps cutoff and to diffusion away from the surface); the lower QE comes mainly from A_layer.
+* R_back = 0.5 helps little: a reflected electron usually reaches the back again. R_back = 1
+  roughly doubles QE at every thickness, at the price of slower emission and lower ESP (≈ 45 % of the
+  emitted electrons were reflected at least once). At 500 nm with R_back = 1 QE and ESP approach the
+  semi-infinite values (1.80 eV: QE slightly above: electrons that would diffuse away are returned).
+* The front band bending is the semi-infinite C21 profile throughout (d ≥ 10 W_bb here); the model
+  has no back-interface potential, no substrate transport and no optical interference.
