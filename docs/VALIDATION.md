@@ -208,3 +208,26 @@ max 2.7.
 * **Response time / near-edge** (bulk, band-edge mass, χ = 0.67): only 21 % (1.45 eV) to 32 %
   (1.70 eV) of the QE is emitted within 10 ps; those early electrons have ESP 38–49 % against 21–26 %
   for all electrons emitted up to 370 ps.
+
+### The χ = 0.73 ESP discrepancy (`validation/stage_e_chi_esp.py`, variant `bulk_step`)
+
+C21's ESP rises steeply with χ (at 1.6 eV: 26 % for χ ≤ 0.70, 33 % for χ = 0.73); ours barely does
+(25–26 %). Findings, bulk mode, band-edge mass:
+
+* **Mechanism (energy/time selection by the surface).** In our model ESP depends strongly on the
+  emission time: ≈ 43–50 % for electrons emitted in the first 3 ps at 1.6 eV, ≈ 5 % after 100 ps.
+  ESP can therefore rise with χ only if a higher vacuum level removes the late, thermalized electrons.
+  It does so only weakly: the share of QE emitted within 10 ps grows from 0.28 (χ = 0.64) to 0.32
+  (χ = 0.73) at 1.6 eV and from 0.35 to 0.44 at 1.8 eV. A thermalized electron reaches the surface with
+  E_tot ≈ E_bb + 3kT/2 ≈ 0.73 eV, i.e. right at χ = 0.73, so about half of them can still emit.
+* **How cold the thermalized electrons are matters.** C21's Pauli step rule for e–h scattering (Eq. 44)
+  does not preserve detailed balance and thermalizes electrons at ⟨E⟩/kT = 1.19 instead of 1.50
+  (`eh_detailed_balance.txt`). With it (`bulk_step`) the selection is stronger (1.8 eV: within-10-ps
+  share 0.34 → 0.49 from χ = 0.64 to 0.73) and the χ = 0.73 ESP rises by 4–6 % at 1.65–1.75 eV:
+  mean deviation from C21 −3.6 → −2.5 %, rms 5.6 → 4.0 %. χ = 0.64–0.67 are unchanged within errors.
+  But QE falls to 0.87 → 0.81 of C21's (χ = 0.64 → 0.73), so the step rule alone does not reproduce
+  C21; it accounts for roughly half of the χ = 0.73 ESP gap.
+* Not resolved. Candidates not checked: other differences in how much energy electrons lose in the
+  band-bending region before the surface, C21's 1 fs Verlet step (≈ 2 meV energy error per crossing),
+  and the exact absorption depth profile. Fermi–Dirac blocking stays the default (it is the
+  physically consistent choice); `bulk_step` is kept as a documented sensitivity variant.

@@ -6,7 +6,7 @@ for chi = 0.64, 0.67, 0.70, 0.73 eV, end to end (photoexcitation -> transport ->
            surface step for every surface variant
   surface  python validation/stage_e_fig18.py surface <bulk|local> <vmass|bmass|all> [workers=14]
            only the surface step, from the saved first arrivals
-  fast     python validation/stage_e_fig18.py fast <bulk|local> [N_per_hv=100000] [cuda|cpu]
+  fast     python validation/stage_e_fig18.py fast <bulk|local|bulk_step> [N_per_hv=100000] [cuda|cpu]
            the same two steps with the fast engine (gaas_mc/fast, docs/PERFORMANCE.md), one chunk of
            N electrons per photon energy, all chi and surface variants in one launch; results go to
            <variant>_fast/ (report tag e.g. bulk_fast/vmass)
@@ -96,9 +96,17 @@ class BranchedSurface:
         return outcome, info
 
 
+VARIANTS = {"bulk": dict(depletion_scattering="bulk"),
+            "local": dict(depletion_scattering="local"),
+            # sensitivity: C21's Eq. 44 step rule for the Pauli blocking of e-h scattering, which does
+            # not preserve detailed balance (validation/eh_detailed_balance.py: <E>/kT = 1.19 instead
+            # of 1.50 at 1e19); the default is Fermi-Dirac blocking
+            "bulk_step": dict(depletion_scattering="bulk", pauli_blocking="step_c21")}
+
+
 def _setup(variant):
     variant = variant.replace("_fast", "")
-    a = ModelAssumptions(depletion_scattering=variant, absorption_model="adachi1989")
+    a = ModelAssumptions(absorption_model="adachi1989", **VARIANTS[variant])
     s = Sample(MAT, per_cm3(P))
     field = C21BandBending(s)
     mech = build_mechanisms(s, a, "C", field=field)

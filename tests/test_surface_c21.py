@@ -185,8 +185,9 @@ def test_transport_bookkeeping_and_branching():
 def test_matching_mass_option():
     """band_edge uses m* instead of the velocity mass: lower T for a nonparabolic electron, and
     identical when alpha E -> 0."""
-    sv = C21Surface(chi=ev(0.67), material=MAT)
-    sb = C21Surface(chi=ev(0.67), material=MAT, matching_mass="band_edge")
+    sb = C21Surface(chi=ev(0.67), material=MAT)                         # default: band edge
+    assert sb.matching_mass == "band_edge"
+    sv = C21Surface(chi=ev(0.67), material=MAT, matching_mass="velocity")
     rng = np.random.default_rng(0)
     E = ev(np.array([0.7, 0.9]))
     k = np.zeros((2, 3)); k[:, 2] = -bands.k_of_E(E, G.m_eff, G.alpha)

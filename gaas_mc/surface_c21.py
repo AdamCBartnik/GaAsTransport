@@ -25,11 +25,13 @@ Implementation choices (docs/MODEL_ASSUMPTIONS.md, Stage E):
     K_par, so an L electron ~1 eV above its minimum with a small chi could escape.
   * Energies inside: E_tot = (valley offset) + E_kin, relative to the Gamma band edge at z = 0.
   * Transfer matrix: BenDaniel-Duke matching (psi and psi'/m continuous). Inside the GaAs the normal
-    wavevector is the electron's k_z, with the velocity mass m_v = m*(1 + 2 alpha E), so the incident
-    flux hbar k_z / m_v equals the group velocity (matching_mass="velocity", default; "band_edge"
-    uses m* instead, the literal reading of C21). The barrier is split into n_slices constant
-    slices of mass m0; the vacuum has mass m0.
-        T = (k_out / m0) / (k_in / m_v) * |t|^2
+    wavevector is the electron's k_z with mass m_in: matching_mass="band_edge" (default since
+    2026-10-06, user decision) uses the band-edge m*, the literal reading of C21's "the electron mass
+    changes from m*_e to m0", which reproduces C21 Fig. 18 QE (docs/VALIDATION.md);
+    matching_mass="velocity" uses m*(1 + 2 alpha E), so that the incident flux hbar k_z / m_in equals
+    the group velocity of the nonparabolic band (option). The barrier is split into n_slices
+    constant slices of mass m0; the vacuum has mass m0.
+        T = (k_out / m0) / (k_in / m_in) * |t|^2
   * Reflection is specular (k_z -> -k_z, k_par unchanged).
 """
 from __future__ import annotations
@@ -51,11 +53,11 @@ class C21Surface:
     E_b: float = 4.0 * EV
     L_b: float = 0.15 * NM
     n_slices: int = 200
-    matching_mass: str = "velocity"
-    """GaAs-side mass in the transfer matrix: "velocity" (default) m*(1 + 2 alpha E), so the incident
-    flux hbar k_z / m equals the group velocity; "band_edge": the band-edge m* of C21's sentence "the
-    electron mass changes from m*_e to m0" read literally (k_z is the electron's own wavevector in
-    both cases). C21 do not state how nonparabolicity enters the matching."""
+    matching_mass: str = "band_edge"
+    """GaAs-side mass in the transfer matrix: "band_edge" (default): the band-edge m* of C21's
+    sentence "the electron mass changes from m*_e to m0" read literally, which reproduces C21 Fig. 18;
+    "velocity": m*(1 + 2 alpha E), so the incident flux hbar k_z / m equals the group velocity (k_z
+    is the electron's own wavevector in both cases). C21 do not state how nonparabolicity enters."""
     is_surface_model: bool = True   # marker used by transport
 
     def __post_init__(self):
