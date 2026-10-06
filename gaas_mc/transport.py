@@ -3,13 +3,19 @@
 Every electron is an independent history with its own clock. Each loop iteration advances
 every alive electron by one free flight followed by one scattering event.
 
-Free flight (ModelAssumptions.flight_mode):
-  * direct (default when the field is zero): E is constant during the flight, so
+Free flight (ModelAssumptions.flight_mode). Each field has a depth z_max beyond which it vanishes
+(C21 band bending: z_max = W_bb).
+  * Field-free region (z >= z_max), "auto" mode: E is constant during the flight, so
         tau = -ln(U) / W_total(E),   W_total = sum_i W_i(E),
-    is exact and there is no self-scattering. The only null events left are rejections
-    inside a mechanism (e-h Eq. 40, kinematics, Pauli blocking).
-  * self_scattering (required with a field): tau = -ln(U) / Gamma0[valley] with a constant
-    bound Gamma0 >= max_E W_total(E) over the rate table; U*Gamma0 > W_total means self-scattering.
+    is exact, with no self-scattering. The only null events left are rejections inside a
+    mechanism (e-h Eq. 40, kinematics, Pauli blocking).
+  * Field region (z < z_max), or flight_mode = "self_scattering": tau = -ln(U) / Gamma0[valley],
+    with a constant bound Gamma0 >= max_E W_total(E) over the rate table. U*Gamma0 > W_total means
+    self-scattering, so the varying E(t) is handled exactly (null-collision method).
+  * A flight that reaches z = z_max is stopped there without a scattering event, and the next
+    flight is drawn in the new region. This is exact because both the W_total(E) process (E
+    constant) and the Gamma0 process are memoryless Poisson processes, which may be restarted at
+    any stopping time.
 During the flight, [C21] Eqs. 17-19:
     dz/dt = v_z(k),   hbar dk/dt = -e E_z(z) z_hat.
 Without a field this is exact (z += v_z tau). With a field, kick-drift-kick (velocity-Verlet)
@@ -32,7 +38,13 @@ Boundaries:
     surface = "absorb"  stop at z = 0 and store a SurfaceArrivals record (default)
               "reflect" specular reflection k_z -> -k_z (e.g. internal-ESP studies, Eq. 55)
               "none"    no boundary (infinite homogeneous medium)
-    z_back  : optional absorbing back contact at z = z_back (thin films), status BACK.
+    z_back  : optional back boundary at z = z_back (thin films): back = "absorb" (status BACK) or
+              "reflect" (specular; the flight stops at the wall, k_z flips, and the next flight
+              follows, which is exact by memorylessness).
+dt_max_field: velocity-Verlet substep in the field region. Default (None): h = min(2 fs, 0.05/omega),
+              omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
+              C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
+              < 0.15 meV, versus ~2 meV for the 1 fs step used in C21 (second order, tested).
 """
 from __future__ import annotations
 
@@ -48,7 +60,7 @@ from .particle import ALIVE, BACK, SURFACE, TIMEOUT, Ensemble
 from .spin import flip_probability
 from .surface import SurfaceArrivals
 
-EV_NONE, EV_SURFACE, EV_BACK = 0, 1, 2
+EV_NONE, EV_SURFACE, EV_BACK, EV_REGION, EV_WALL = 0, 1, 2, 3, 4
 
 
 @dataclass
@@ -84,8 +96,8 @@ class Result:
 class Simulation:
     def __init__(self, sample, mechanisms, spin_model=None, field=None, t_max=370 * PS,
                  surface="absorb", z_back=None, E_table_max=2.0 * EV, n_table=4001,
-                 dt_max_field=1 * FS, snapshot_times=(), log_events=False, gamma0_margin=1.02,
-                 assumptions=DEFAULT):
+                 dt_max_field=None, snapshot_times=(), log_events=False, gamma0_margin=1.02,
+                 assumptions=DEFAULT, back="absorb"):
         self.sample = sample
         self.material = sample.material
         self.mechanisms = list(mechanisms)
@@ -99,18 +111,34 @@ class Simulation:
             raise ValueError(surface)
         self.surface = surface
         self.z_back = z_back
-        self.dt_max = float(dt_max_field)
+        if back not in ("absorb", "reflect"):
+            raise ValueError(back)
+        self.back = back
         self.assumptions = assumptions.validate()
         self.spin_flip_at_arrival = assumptions.spin_flip_at_arrival
         mode = assumptions.flight_mode
-        if mode == "auto":
-            mode = "direct" if self.field.is_zero else "self_scattering"
         if mode == "direct" and not self.field.is_zero:
-            raise ValueError("direct W_total(E) flights are only exact without a field")
+            raise ValueError("direct W_total(E) flights are only exact without a field; use 'auto'")
+        self.z_field = 0.0 if self.field.is_zero else float(getattr(self.field, "z_max", np.inf))
+        if mode == "auto":
+            mode = ("direct" if self.z_field <= 0 else
+                    "self_scattering" if np.isinf(self.z_field) else "hybrid")
         self.flight_mode = mode
+        self.dt_max = float(dt_max_field) if dt_max_field is not None else self._auto_field_step()
         self.snapshot_times = np.sort(np.asarray(snapshot_times, float))
         self.log_events = log_events
         self._build_tables(E_table_max, n_table, gamma0_margin)
+
+    def _auto_field_step(self, eta=0.05, cap=2 * FS):
+        if self.field.is_zero:
+            return cap
+        zmax = self.z_field if np.isfinite(self.z_field) else 1e-6
+        z = np.linspace(0.0, zmax, 2001)
+        grad = np.abs(np.gradient(self.field.Ez(z), z)).max()
+        if grad == 0:
+            return cap
+        omega = np.sqrt(Q_E * grad / self.material.gamma.m_eff)
+        return float(min(cap, eta / omega))
 
     # ------------------------------------------------------------------------------------
     # Rate tables
@@ -161,86 +189,154 @@ class Simulation:
         a = np.array([v.alpha for v in vs])[valley]
         return m, a
 
+    def in_field(self, z, k, E, valley):
+        """True where the particle is inside the field region (z < z_max). A particle exactly at
+        z_max counts as inside if it is moving toward the surface."""
+        if self.z_field <= 0:
+            return np.zeros(z.size, bool)
+        if np.isinf(self.z_field):
+            return np.ones(z.size, bool)
+        m, a = self._valley_params(valley)
+        vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
+        return (z < self.z_field) | ((z <= self.z_field * (1 + 1e-12)) & (vz < 0))
+
     def propagate(self, z, k, E, valley, dt):
         """Propagate copies of (z, k, E) for times dt (per particle). Returns
-        (z, k, E, dt_used, event), event in {EV_NONE, EV_SURFACE, EV_BACK}. A particle that
-        hits an absorbing boundary stops there, and dt_used is the time of the hit."""
-        z = z.copy(); k = k.copy(); E = E.copy()
+        (z, k, E, dt_used, event), event in {EV_NONE, EV_SURFACE, EV_BACK, EV_REGION}. A particle
+        that reaches an absorbing boundary or the field-region boundary stops there, and dt_used
+        is the time at which it did."""
+        z = z.copy(); k = k.copy(); E = E.copy(); dt = np.asarray(dt, float)
         m, a = self._valley_params(valley)
+        event = np.zeros(z.size, np.int8)
+        dt_used = dt.copy()
+        inside = self.in_field(z, k, E, valley)
+        out = ~inside
+        if out.any():
+            r = self._propagate_free(z[out], k[out], E[out], m[out], a[out], dt[out])
+            z[out], k[out], E[out], dt_used[out], event[out] = r
+        if inside.any():
+            r = self._propagate_field(z[inside], k[inside], E[inside], m[inside], a[inside], dt[inside])
+            z[inside], k[inside], E[inside], dt_used[inside], event[inside] = r
+        return z, k, E, dt_used, event
+
+    def _propagate_free(self, z, k, E, m, a, dt):
+        """Straight-line flight where the field vanishes (exact)."""
         n = z.size
         event = np.zeros(n, np.int8)
-        dt_used = dt.copy()
-        if self.field.is_zero:
-            vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
-            z1 = z + vz * dt
-            if self.surface == "absorb":
-                hit = z1 <= 0
-                dt_used[hit] = z[hit] / (-vz[hit])
-                z1[hit] = 0.0
-                event[hit] = EV_SURFACE
-            elif self.surface == "reflect":
-                hit = z1 < 0
-                z1[hit] = -z1[hit]
-                k[hit, 2] = -k[hit, 2]
+        vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
+        z1 = z + vz * dt
+        t_ev = np.full(n, np.inf)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            if 0 < self.z_field < np.inf:                   # entering the field region
+                hr = (z1 < self.z_field) & (vz < 0)
+                t_ev[hr] = (z[hr] - self.z_field) / (-vz[hr])
+                event[hr] = EV_REGION
+            if self.surface in ("absorb", "reflect"):
+                hs = (z1 <= 0) & (vz < 0)
+                ts = z / (-vz)
+                upd = hs & (ts < t_ev)
+                t_ev[upd] = ts[upd]
+                event[upd] = EV_SURFACE
             if self.z_back is not None:
-                hb = (z1 >= self.z_back) & (event == EV_NONE)
-                dt_used[hb] = (self.z_back - z[hb]) / vz[hb]
-                z1[hb] = self.z_back
-                event[hb] = EV_BACK
-            return z1, k, E, dt_used, event
-        return self._propagate_field(z, k, E, m, a, dt, dt_used, event)
+                hb = (z1 >= self.z_back) & (vz > 0)
+                tb = (self.z_back - z) / vz
+                upd = hb & (tb < t_ev)
+                t_ev[upd] = tb[upd]
+                event[upd] = EV_BACK
+        stop = event != EV_NONE
+        dt_used = np.where(stop, np.clip(t_ev, 0.0, dt), dt)
+        z1 = np.where(stop, z + vz * dt_used, z1)
+        z1[event == EV_SURFACE] = 0.0
+        z1[event == EV_REGION] = self.z_field
+        if self.z_back is not None:
+            z1[event == EV_BACK] = self.z_back
+            if self.back == "reflect":
+                wall = event == EV_BACK
+                k[wall, 2] = -k[wall, 2]
+                event[wall] = EV_WALL
+        if self.surface == "reflect":                  # stop on the surface, flip k_z, restart (exact)
+            refl = event == EV_SURFACE
+            k[refl, 2] = -k[refl, 2]
+            event[refl] = EV_WALL
+        return z1, k, E, dt_used, event
+
+    def _Ez_ext(self, z):
+        """Field with mirror images across reflecting walls (method of images): E_z(-z) = -E_z(z) at a
+        reflecting surface, and likewise about a reflecting back wall. A substep that ends beyond the
+        wall, mirrored back (z -> -z, k_z -> -k_z), is then the reflected trajectory to integrator
+        order, and time always advances."""
+        z = np.asarray(z, float)
+        if self.surface == "reflect" and np.any(z < 0):
+            zi = np.where(z < 0, -z, z)
+            Ez = self.field.Ez(zi)
+            Ez = np.where(z < 0, -Ez, Ez)
+        else:
+            Ez = self.field.Ez(z)
+        if self.z_back is not None and self.back == "reflect" and np.any(z > self.z_back):
+            beyond = z > self.z_back
+            Ez = np.where(beyond, -self.field.Ez(np.where(beyond, 2 * self.z_back - z, z)), Ez)
+        return Ez
 
     def _kdk(self, z, k, m, a, h):
-        """One kick-drift-kick substep of length h (arrays)."""
-        F = -Q_E * self.field.Ez(z)                     # force along z, Eq. 18
+        """One kick-drift-kick (velocity-Verlet) substep of length h, Eqs. 17-18."""
+        F = -Q_E * self._Ez_ext(z)                      # force along z, Eq. 18
         k[:, 2] += 0.5 * F * h / HBAR
         E = bands.E_of_k(np.linalg.norm(k, axis=1), m, a)
         vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
         z = z + vz * h
-        F = -Q_E * self.field.Ez(z)
+        F = -Q_E * self._Ez_ext(z)
         k[:, 2] += 0.5 * F * h / HBAR
         return z, k
 
-    def _propagate_field(self, z, k, E, m, a, dt, dt_used, event):
+    def _propagate_field(self, z, k, E, m, a, dt):
+        """Velocity-Verlet substeps (<= dt_max) inside the field region. A substep that crosses a
+        boundary (surface, back contact, or field-region boundary z_max) is redone with the
+        interpolated fraction so the particle stops on the boundary."""
+        n = z.size
+        event = np.zeros(n, np.int8)
         remaining = dt.copy()
-        elapsed = np.zeros_like(dt)
+        elapsed = np.zeros(n)
+        zr = self.z_field if 0 < self.z_field < np.inf else None
         active = remaining > 0
         while np.any(active):
             ia = np.flatnonzero(active)
             h = np.minimum(remaining[ia], self.dt_max)
             z_old, k_old = z[ia].copy(), k[ia].copy()
             z_new, k_new = self._kdk(z_old.copy(), k_old.copy(), m[ia], a[ia], h)
-            # boundaries: redo the substep with the interpolated fraction
-            if self.surface in ("absorb", "reflect") or self.z_back is not None:
-                cross_s = (z_new <= 0) if self.surface != "none" else np.zeros(ia.size, bool)
-                cross_b = (z_new >= self.z_back) if self.z_back is not None else np.zeros(ia.size, bool)
-                cr = cross_s | cross_b
-                if np.any(cr):
-                    zb = np.where(cross_s, 0.0, self.z_back if self.z_back is not None else 0.0)
-                    f = np.clip((z_old - zb) / (z_old - z_new), 0.0, 1.0)
-                    hc = h * f
-                    zc, kc = self._kdk(z_old[cr].copy(), k_old[cr].copy(), m[ia][cr], a[ia][cr], hc[cr])
-                    z_new[cr] = zb[cr]
-                    k_new[cr] = kc
-                    h = np.where(cr, hc, h)
-                    if self.surface == "reflect":
-                        refl = cross_s & cr
-                        k_new[refl, 2] = -k_new[refl, 2]
-                        z_new[refl] = 0.0
-                        cross_s = cross_s & ~refl
-                    stop_s = cross_s & (self.surface == "absorb")
-                    stop = stop_s | cross_b
-                    event[ia[stop_s]] = EV_SURFACE
-                    event[ia[cross_b]] = EV_BACK
-                    remaining[ia[stop]] = 0.0
+            # reflecting walls: mirror the full substep (z -> -z, k_z -> -k_z), with the image field of
+            # _Ez_ext. This always advances time; stopping on the wall could stall when the field pushes
+            # the electron back onto it.
+            if self.surface == "reflect":
+                rs = z_new < 0
+                z_new[rs] = -z_new[rs]
+                k_new[rs, 2] = -k_new[rs, 2]
+            if self.z_back is not None and self.back == "reflect":
+                rb = z_new > self.z_back
+                z_new[rb] = 2 * self.z_back - z_new[rb]
+                k_new[rb, 2] = -k_new[rb, 2]
+            cross_s = (z_new <= 0) if self.surface == "absorb" else np.zeros(ia.size, bool)
+            cross_b = (z_new >= self.z_back) if (self.z_back is not None and self.back == "absorb")                 else np.zeros(ia.size, bool)
+            cross_r = (z_new >= zr) & ~cross_b if zr is not None else np.zeros(ia.size, bool)
+            cr = cross_s | cross_b | cross_r
+            if np.any(cr):
+                zb = np.where(cross_s, 0.0, np.where(cross_b, self.z_back or 0.0, zr or 0.0))
+                f = np.clip((z_old - zb) / (z_old - z_new), 0.0, 1.0)
+                hc = h * f
+                _, kc = self._kdk(z_old[cr].copy(), k_old[cr].copy(), m[ia][cr], a[ia][cr], hc[cr])
+                z_new[cr] = zb[cr]
+                k_new[cr] = kc
+                h = np.where(cr, hc, h)
+                event[ia[cross_s]] = EV_SURFACE
+                event[ia[cross_b]] = EV_BACK
+                event[ia[cross_r]] = EV_REGION
             z[ia] = z_new
             k[ia] = k_new
             elapsed[ia] += h
             remaining[ia] -= h
-            remaining[ia[event[ia] != EV_NONE]] = 0.0
+            remaining[event != EV_NONE] = 0.0
             active = remaining > 1e-30
         stopped = event != EV_NONE
-        dt_used[stopped] = elapsed[stopped]
+        dt_used = np.where(stopped, elapsed, dt)
         E = bands.E_of_k(np.linalg.norm(k, axis=1), m, a)
         return z, k, E, dt_used, event
 
@@ -278,17 +374,18 @@ class Simulation:
                 raise RuntimeError("an electron is in a valley without mechanisms")
             if np.any(ens.E[idx] > self.E_table_max):
                 raise RuntimeError("electron energy left the rate table; raise E_table_max")
-            G = self._flight_rate(ens.E[idx], v)
+            inside = self.in_field(ens.z[idx], ens.k[idx], ens.E[idx], v)
+            G = self._flight_rate(ens.E[idx], v, inside)
             with np.errstate(divide="ignore"):
                 tau = -np.log1p(-rng.random(idx.size)) / G          # G = 0 -> infinite flight
             t0 = ens.t[idx]
             dt = np.minimum(tau, self.t_max - t0)
             timeout = tau >= self.t_max - t0
-
-            if snaps is not None:
-                self._record_snapshots(ens, idx, t0, dt, snaps)
+            state0 = (ens.z[idx].copy(), ens.k[idx].copy(), ens.E[idx].copy())
 
             z1, k1, E1, dt_used, event = self.propagate(ens.z[idx], ens.k[idx], ens.E[idx], v, dt)
+            if snaps is not None:
+                self._record_snapshots(ens, idx, state0, v, t0, dt_used, snaps)
             ens.z[idx], ens.k[idx], ens.E[idx] = z1, k1, E1
             ens.t[idx] = t0 + dt_used
             ens.dt_spin[idx] += dt_used
@@ -303,6 +400,8 @@ class Simulation:
                 ens.status[ih] = SURFACE
                 arrivals.append(self._arrival_record(ens, ih, n_events))
             ens.status[idx[event == EV_BACK]] = BACK
+            # EV_REGION / EV_WALL: the flight stopped at the field boundary or reflected off the back
+            # wall; there is no scattering event, and the next flight follows
             done_t = timeout & (event == EV_NONE)
             ens.status[idx[done_t]] = TIMEOUT
 
@@ -322,13 +421,15 @@ class Simulation:
                       n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej,
                       flight_mode=self.flight_mode, event_log=log)
 
-    def _flight_rate(self, E, valley):
-        """Rate used to draw the free flight: W_total(E) (direct) or Gamma0 (self-scattering)."""
+    def _flight_rate(self, E, valley, inside):
+        """Rate used to draw the free flight: W_total(E) in the field-free region (direct), or
+        Gamma0 inside the field region or when self-scattering is forced."""
+        G = self.gamma0[valley].astype(float)
         if self.flight_mode == "self_scattering":
-            return self.gamma0[valley]
-        G = np.empty_like(E)
-        for vv in np.unique(valley):
-            sel = valley == vv
+            return G
+        free = ~inside
+        for vv in np.unique(valley[free]):
+            sel = free & (valley == vv)
             G[sel] = self.rates_at(E[sel], vv).sum(axis=0)
         return G
 
@@ -366,8 +467,9 @@ class Simulation:
                 raise RuntimeError("total rate exceeds the flight rate; table/margin problem")
             r = rng.random(iv.size) * Gv
             choice = (r[None, :] > cum).sum(axis=0)              # == M_v -> self-scattering
-            if self.flight_mode == "direct":                     # no null events by construction
-                choice = np.minimum(choice, len(mech_idx) - 1)
+            # direct flights (G = W_total) have no null events; guard against round-off
+            direct = np.isclose(Gv, cum[-1], rtol=1e-9)
+            choice = np.where(direct, np.minimum(choice, len(mech_idx) - 1), choice)
             n_self += int((choice == len(mech_idx)).sum())
             for j, mi in enumerate(mech_idx):
                 sel = iv[choice == j]
@@ -400,20 +502,20 @@ class Simulation:
                     log["valley_after"].append(ens.valley[acc].copy())
         return n_self
 
-    def _record_snapshots(self, ens, idx, t0, dt, snaps):
-        t1 = t0 + dt
+    def _record_snapshots(self, ens, idx, state0, v, t0, dt_used, snaps):
+        """Record the state at snapshot times inside this flight, [t0, t0 + dt_used], by
+        re-propagating copies of the flight's initial state (no boundary is crossed before dt_used)."""
+        z0, k0, E0 = state0
+        t1 = t0 + dt_used
         for i, ts in enumerate(snaps.times):
-            sel = (t0 < ts) & (ts <= t1) if ts > 0 else (t0 == 0) & (ts == 0)
+            sel = (t0 < ts) & (ts <= t1) if ts > 0 else (t0 == 0)
             if not np.any(sel):
                 continue
             ii = idx[sel]
             if ts == 0:
-                z, E = ens.z[ii], ens.E[ii]
+                z, E = z0[sel], E0[sel]
             else:
-                z, k, E, _, event = self.propagate(ens.z[ii], ens.k[ii], ens.E[ii], ens.valley[ii],
-                                                   ts - t0[sel])
-                ok = event == EV_NONE
-                ii, z, E = ii[ok], z[ok], E[ok]
+                z, _, E, _, _ = self.propagate(z0[sel], k0[sel], E0[sel], v[sel], ts - t0[sel])
             snaps.E[i, ii] = E
             snaps.z[i, ii] = z
             snaps.spin[i, ii] = ens.spin[ii]
@@ -426,4 +528,5 @@ class Simulation:
             E0=ens.E0[ih].copy(), band=ens.band[ih].copy(), n_flips=ens.n_flips[ih].copy(),
             n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
             time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
+            band_edge_at_surface=float(self.field.band_edge(np.array([0.0]))[0]),
             mechanism_names=self.names)

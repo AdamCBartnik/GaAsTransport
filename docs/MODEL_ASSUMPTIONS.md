@@ -186,6 +186,26 @@ flags. `SurfaceArrivals.upper_valley_summary()` reports:
 
 These numbers indicate whether a literature-based L/X spin model is needed.
 
+## 6a. Band bending and fields (Stage D)
+
+| Item | Choice | Note |
+|---|---|---|
+| Profile | `fields.C21BandBending(sample)`: E_C(z) = E_Cb − E_bb(1 − z/W_bb)² for z < W_bb (Eq. 61), E_z = 2E_bb/(eW_bb)·(1 − z/W_bb) (Eq. 62) | E_bb = E_g/2 − E_F^b, with the surface Fermi level pinned mid-gap (Eqs. 56–58); W_bb from Eq. 59. Both can be overridden. Reproduces C21's 0.694 eV / 9.947 nm at 1e19. |
+| User potential | `fields.PotentialField(E_C_fn, z_max=...)` or `CallableField(Ez_fn, band_edge_fn, z_max=...)` | For replacing C21's profile with your own electrostatics or image-charge model. |
+| Valleys | All valleys shift rigidly with E_C(z) | The tracked E is the kinetic energy above the local valley minimum. |
+| Scattering in the band-bending region | Identical to the bulk (C21 Sec. IV) | Physically the region is depleted of holes, so e–h scattering, BAP, and screening should all change there. **Not modelled** (same as C21); worth revisiting for the 10–75 nm region. |
+| Flights | `"auto"` = hybrid: direct W_total(E) for z ≥ z_max, null-collision with a constant bound inside the field region. Flights are stopped at z = z_max (exact by memorylessness). | `Result.flight_mode` reports `"hybrid"`. |
+| Integrator | Velocity Verlet (kick–drift–kick). Default substep h = min(2 fs, 0.05/ω), with ω = √(e·max\|dE_z/dz\|/m_Γ) | 0.25 fs at 1e19, 0.65 fs at 1.5e18, 2 fs at 1.5e17. Error crossing the band bending ≤ 0.14 meV at 1e19; C21's 1 fs step gives ~2 meV, systematically positive. Second-order convergence is tested. |
+| Surface arrivals | `SurfaceArrivals.band_edge_at_surface` = E_C(0) − E_C(bulk) (= −E_bb) | Puts arrival kinetic energies on an absolute scale for the surface model. |
+| Back wall | `Simulation(z_back=L, back="absorb" \| "reflect")` | A reflecting wall stops the flight, flips k_z, and restarts (exact). |
+
+Validation (`validation/stage_d_band_bending.py`, `tests/test_stage_d.py`):
+* Figs. 16 and 17 are reproduced.
+* Energy is conserved ballistically, and transverse k is unchanged.
+* Flights stop and restart correctly at the region boundary.
+* **Equilibrium:** in a closed slab with reflecting walls, the density follows n(z) ∝ exp(−E_C(z)/kT)
+  within ±4–8% statistics, and ⟨E⟩ = 1.552 kT against the exact nonparabolic Maxwellian (1.556 kT).
+
 ## 6. Other
 
 | Field | Default | Note |

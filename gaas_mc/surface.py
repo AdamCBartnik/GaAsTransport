@@ -5,7 +5,8 @@ state is stored here. No emission physics is applied: electron affinity, mass di
 image charge, and transmission belong to a separate surface model that consumes these records.
 
 Energies are kinetic energies above the local conduction-band minimum of the electron's
-valley at z = 0. Spin s = +1/-1 along +z, the light propagation direction (into the material),
+valley at z = 0. ``band_edge_at_surface`` = E_C(0) - E_C(bulk) (negative with downward band bending)
+places them on an absolute scale: E_total - E_C(bulk) = E + band_edge_at_surface + valley offset. Spin s = +1/-1 along +z, the light propagation direction (into the material),
 so s = +1 points *away* from the vacuum.
 """
 from __future__ import annotations
@@ -33,6 +34,7 @@ class SurfaceArrivals:
     pid: np.ndarray
     time_in_valley: np.ndarray = None   # (n, 3) time spent in Gamma, L, X before arrival [s]
     visited: np.ndarray = None          # (n, 3) bool: valley ever occupied
+    band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
     mechanism_names: tuple = ()
 
     @property
@@ -81,17 +83,19 @@ class SurfaceArrivals:
             return cls.empty(n_mech, names)
         out = {}
         for f in fields(cls):
-            if f.name == "mechanism_names":
+            if f.name in ("mechanism_names", "band_edge_at_surface"):
                 continue
             out[f.name] = np.concatenate([getattr(p, f.name) for p in parts])
-        return cls(**out, mechanism_names=tuple(names))
+        return cls(**out, band_edge_at_surface=parts[0].band_edge_at_surface, mechanism_names=tuple(names))
 
     def save_npz(self, path):
         d = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "mechanism_names"}
+        d["band_edge_at_surface"] = np.array(self.band_edge_at_surface)
         np.savez_compressed(path, mechanism_names=np.array(self.mechanism_names), **d)
 
     @classmethod
     def load_npz(cls, path):
         d = dict(np.load(path, allow_pickle=False))
         names = tuple(str(x) for x in d.pop("mechanism_names"))
+        d["band_edge_at_surface"] = float(d.get("band_edge_at_surface", 0.0))
         return cls(**d, mechanism_names=names)
