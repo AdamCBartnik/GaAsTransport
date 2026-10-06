@@ -45,6 +45,8 @@ class SurfaceArrivals:
     K: np.ndarray = None                # (n, 3) full crystal wavevector = valley center + k [1/m]
     band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
     n_back: np.ndarray = None           # back-boundary encounters before the arrival (finite layers)
+    x: np.ndarray = None                # lateral displacement from the excitation point [m]
+    y: np.ndarray = None
     mechanism_names: tuple = ()
 
     @property
@@ -86,7 +88,7 @@ class SurfaceArrivals:
                    n_events=np.zeros((0, n_mech), np.int32), pid=np.zeros(0, int),
                    time_in_valley=np.zeros((0, 3)), visited=np.zeros((0, 3), bool),
                    eqv=np.zeros(0, np.int8), K=np.zeros((0, 3)), dt_spin=np.zeros(0),
-                   n_back=np.zeros(0, np.int32),
+                   n_back=np.zeros(0, np.int32), x=np.zeros(0), y=np.zeros(0),
                    mechanism_names=tuple(names))
 
     @classmethod
@@ -139,6 +141,8 @@ class Emissions:
     p_vac: np.ndarray        # (n, 3) momentum in vacuum [kg m/s] (p_z < 0: leaving toward -z)
     E_vac: np.ndarray        # kinetic energy in vacuum above the vacuum level [J]
     n_back: np.ndarray = None   # back-boundary encounters before the emission (finite layers)
+    x: np.ndarray = None        # lateral displacement from the excitation point at emission [m]
+    y: np.ndarray = None
 
     def __len__(self):
         return self.t.size
@@ -162,7 +166,8 @@ class Emissions:
             return cls(t=z, E=z, k=np.zeros((0, 3)), K=np.zeros((0, 3)), valley=np.zeros(0, np.int8),
                        eqv=np.zeros(0, np.int8), spin=np.zeros(0, np.int8), spin0=np.zeros(0, np.int8),
                        z0=z, E0=z, band=np.zeros(0, np.int8), n_surface=np.zeros(0, np.int32),
-                       pid=np.zeros(0, int), p_vac=np.zeros((0, 3)), E_vac=z, n_back=np.zeros(0, np.int32))
+                       pid=np.zeros(0, int), p_vac=np.zeros((0, 3)), E_vac=z, n_back=np.zeros(0, np.int32),
+                       x=z, y=z)
         out = {}
         for f in fields(cls):
             vals = [getattr(q, f.name) for q in parts]

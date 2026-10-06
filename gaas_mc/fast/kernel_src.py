@@ -924,6 +924,8 @@ def record_arrival(i, fs, ist, tiv, vis, n_events, has_arr, arr_f, arr_i, arr_vi
     for c in range(5):
         arr_i[i, c] = ist[i, c]
     arr_i[i, 5] = ist[i, 6]                              # back-boundary encounters
+    arr_f[i, 10] = fs[i, 7]                              # lateral position
+    arr_f[i, 11] = fs[i, 8]
     for c in range(n_events.shape[1]):
         arr_ev[i, c] = n_events[i, c]
 
@@ -960,6 +962,8 @@ def emit(i, fs, ist, branch, em_f, em_i, voff, surf_par, cfg):
     em_f[i, 9] = HBAR * Ky * sc
     em_f[i, 10] = -math.sqrt(2.0 * M0 * (eps if eps > 0.0 else 0.0))
     em_f[i, 11] = E_tot - chi
+    em_f[i, 12] = fs[i, 7]
+    em_f[i, 13] = fs[i, 8]
     em_i[i, 0] = v
     em_i[i, 1] = ist[i, 1]
     em_i[i, 2] = ist[i, 2]
@@ -1053,6 +1057,9 @@ def bounce_train(i, dt, T, fs, ist, tiv, n_flight, branch, em_f, em_i, rng, vpar
             emitted = True
     elapsed = nb_done * t_ret
     v = ist[i, 0]
+    fl = HBAR / (vpar[v, 0] * (1.0 + 2.0 * vpar[v, 1] * fs[i, 5])) * elapsed
+    fs[i, 7] += fs[i, 2] * fl                            # lateral motion along the surface
+    fs[i, 8] += fs[i, 3] * fl
     fs[i, 1] += elapsed
     fs[i, 6] += elapsed
     tiv[i, v] += elapsed
@@ -1077,7 +1084,7 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
     """Advance electron i by up to `budget` flights (the body of the Simulation.run loop for one
     electron). Stops at time-out, back contact, a final surface outcome, an error, or (surface
     mode 0) at a surface encounter with status PENDING for the host. fs columns: z, t, kx, ky, kz,
-    E, dt_spin. ist columns: valley, eqv, spin, status, n_flips, n_surface, n_back."""
+    E, dt_spin, x, y. ist columns: valley, eqv, spin, status, n_flips, n_surface, n_back."""
     t_max = cfg[C_TMAX]
     if start[i] == 1:                                    # start_at_surface (no arrival spin test)
         start[i] = 0
@@ -1133,6 +1140,10 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
         fs[i, 4] = kz1
         fs[i, 5] = E1
         fs[i, 1] = t0 + dt_used
+        # lateral displacement (Simulation._lateral): k_par constant, velocity factor averaged
+        fl = 0.5 * (1.0 / (1.0 + 2.0 * a * E) + 1.0 / (1.0 + 2.0 * a * E1)) * HBAR / m * dt_used
+        fs[i, 7] += kx * fl
+        fs[i, 8] += ky * fl
         fs[i, 6] += dt_used
         tiv[i, v] += dt_used
         n_flight[i] += 1

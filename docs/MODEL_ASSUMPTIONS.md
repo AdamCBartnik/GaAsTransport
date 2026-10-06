@@ -281,6 +281,16 @@ GaAs/substrate boundary.
 | Modularity | The back boundary is an object with `interact(k, E, valley, rng, pid) → reflected?`, the counterpart of the surface model; a physical GaAs/AlGaAs interface model can replace `PartialReflector`. The fast engine compiles `PartialReflector`; other back models currently need the reference engine. |
 | Not supported | A field that pushes electrons into the back boundary (repeated back returns would need the bounce aggregation of the front surface); raises. The C21 band bending always pushes toward z = 0. The legacy `back="reflect"` (mirror wall, closed-slab tests) and `back="absorb"` are unchanged. |
 
+## 6f. Lateral position (bookkeeping)
+
+The sample is laterally homogeneous, so the transport depends on z only. The lateral displacement
+(x, y) from the excitation point is nevertheless tracked in both engines (`Ensemble.x/y`, and in the
+arrival and emission records): k_x, k_y are constant during a flight (field along z) and
+v_par = ħk_par/(m(1+2αE)); exact in the field-free region, velocity factor averaged over the start and
+end energy of a flight in the field region (flights there are ~1 fs); electrons bouncing along the
+surface (bounce trains) keep moving laterally. It does not affect any other result (reference engine
+bitwise unchanged). The ParticleGroup output uses x, y = laser-spot point + lateral displacement.
+
 ## 6. Other
 
 | Field | Default | Note |

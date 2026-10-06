@@ -566,6 +566,7 @@ class Simulation:
             z1, k1, E1, dt_used, event = self.propagate(ens.z[idx], ens.k[idx], ens.E[idx], v, dt)
             if snaps is not None:
                 self._record_snapshots(ens, idx, state0, v, t0, dt_used, snaps)
+            self._lateral(ens, idx, v, state0[2], E1, dt_used)
             ens.z[idx], ens.k[idx], ens.E[idx] = z1, k1, E1
             ens.t[idx] = t0 + dt_used
             ens.dt_spin[idx] += dt_used
@@ -655,8 +656,19 @@ class Simulation:
             valley=ens.valley[ie].copy(), eqv=ens.eqv[ie].copy(), spin=ens.spin[ie].copy(),
             spin0=ens.spin0[ie].copy(), z0=ens.z0[ie].copy(), E0=ens.E0[ie].copy(),
             band=ens.band[ie].copy(), n_surface=ens.n_surface[ie].copy(), pid=ens.pid[ie].copy(),
-            p_vac=p_vac.copy(), E_vac=E_vac.copy(), n_back=ens.n_back[ie].copy()))
+            p_vac=p_vac.copy(), E_vac=E_vac.copy(), n_back=ens.n_back[ie].copy(),
+            x=ens.x[ie].copy(), y=ens.y[ie].copy()))
         ens.status[ie] = EMITTED
+
+    def _lateral(self, ens, idx, v, E0, E1, dt):
+        """Lateral displacement during a flight (bookkeeping; no effect on the transport). k_x, k_y
+        are constant (the field is along z); v_par = hbar k_par / (m (1 + 2 alpha E)). Exact in the
+        field-free region (E constant); in the field region the velocity factor is averaged over the
+        start and end energies of the flight (flights there are ~ 1 fs)."""
+        m, a = self._valley_params(v)
+        f = 0.5 * (1.0 / (1 + 2 * a * E0) + 1.0 / (1 + 2 * a * E1)) * HBAR / m * dt
+        ens.x[idx] += ens.k[idx, 0] * f
+        ens.y[idx] += ens.k[idx, 1] * f
 
     def _bounce_trains(self, ens, idx, v, inside, lt, dt, rng, emissions):
         """Exact aggregation of repeated surface returns (see surface_bounce_aggregation in the module
@@ -690,6 +702,7 @@ class Simulation:
         elapsed = nb_done * trt
         ens.t[it] += elapsed
         ens.dt_spin[it] += elapsed
+        self._lateral(ens, it, v[pos], ens.E[it], ens.E[it], elapsed)   # skimming along the surface
         add_at(ens.time_in_valley, (it, v[pos]), elapsed)
         # saturating int32 encounter counter (a grazing train can add ~1e9 returns)
         ens.n_surface[it] = np.minimum(ens.n_surface[it] + nb_done, 2**31 - 1).astype(np.int32)
@@ -837,6 +850,7 @@ class Simulation:
             n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
             time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
             eqv=ens.eqv[ih].copy(), dt_spin=ens.dt_spin[ih].copy(), n_back=ens.n_back[ih].copy(),
+            x=ens.x[ih].copy(), y=ens.y[ih].copy(),
             K=ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat),
             band_edge_at_surface=float(self.field.band_edge(np.array([0.0]))[0]),
             mechanism_names=self.names)

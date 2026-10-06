@@ -1,6 +1,8 @@
 """Electron ensemble stored as a structure of arrays (ready for vectorization or numba later).
 
-Geometry: 1D real space z (the surface is z = 0; the material is z > 0), 3D k-space.
+Geometry: the physics depends on z only (the surface is z = 0; the material is z > 0), with 3D
+k-space. The lateral position (x, y) is tracked as bookkeeping: displacement from the excitation
+point (laterally homogeneous sample, so it does not influence the transport).
 E is the kinetic energy measured from the bottom of the electron's current valley [J] and is
 kept consistent with |k| through Eq. 2 by every routine that changes k.
 """
@@ -38,6 +40,8 @@ class Ensemble:
     eqv: np.ndarray              # int8: which equivalent valley (L: 0-3, X: 0-2, Gamma: 0), see valleys.py
     n_surface: np.ndarray        # number of surface encounters
     n_back: np.ndarray           # number of back-boundary (z = z_back) encounters
+    x: np.ndarray                # lateral displacement from the excitation point [m]
+    y: np.ndarray
 
     @classmethod
     def create(cls, z, k, E, spin, valley=0, t=0.0):
@@ -54,6 +58,7 @@ class Ensemble:
             pid=np.arange(n), time_in_valley=np.zeros((n, 3)),
             visited=np.eye(3, dtype=bool)[np.full(n, valley)], eqv=np.zeros(n, np.int8),
             n_surface=np.zeros(n, np.int32), n_back=np.zeros(n, np.int32),
+            x=np.zeros(n), y=np.zeros(n),
         )
 
     @classmethod
@@ -66,7 +71,9 @@ class Ensemble:
                    E0=arr.E0.copy(), spin0=arr.spin0.copy(), band=arr.band.copy(), dt_spin=arr.dt_spin.copy(),
                    n_flips=arr.n_flips.copy(), pid=arr.pid.copy(), time_in_valley=arr.time_in_valley.copy(),
                    visited=arr.visited.copy(), eqv=arr.eqv.copy(), n_surface=np.zeros(n, np.int32),
-                   n_back=(arr.n_back.copy() if arr.n_back is not None else np.zeros(n, np.int32)))
+                   n_back=(arr.n_back.copy() if arr.n_back is not None else np.zeros(n, np.int32)),
+                   x=(arr.x.copy() if arr.x is not None else np.zeros(n)),
+                   y=(arr.y.copy() if arr.y is not None else np.zeros(n)))
 
     def __len__(self):
         return self.z.size

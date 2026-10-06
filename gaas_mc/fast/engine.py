@@ -379,7 +379,8 @@ class FastSimulation:
         if np.any(ens.E > sim.E_table_max):
             raise ValueError("initial energies exceed the rate-table range; raise E_table_max")
         host = ens.copy()                       # static per-electron data + host-side bookkeeping
-        fs = np.column_stack([ens.z, ens.t, ens.k[:, 0], ens.k[:, 1], ens.k[:, 2], ens.E, ens.dt_spin])
+        fs = np.column_stack([ens.z, ens.t, ens.k[:, 0], ens.k[:, 1], ens.k[:, 2], ens.E, ens.dt_spin,
+                              ens.x, ens.y])
         ist = np.column_stack([ens.valley, ens.eqv, ens.spin, ens.status, ens.n_flips,
                                ens.n_surface, ens.n_back]).astype(np.int32)
         branch = np.zeros(N, np.int32) if surface_branch is None else np.asarray(surface_branch, np.int32)
@@ -396,9 +397,9 @@ class FastSimulation:
                      vis=ens.visited.astype(np.uint8), n_events=np.zeros((N, M), np.int32),
                      n_rej=np.zeros((N, M), np.int32), n_self=np.zeros(N, np.int64),
                      n_flight=np.zeros(N, np.int64), rng=stream_states(rng, N), branch=branch,
-                     start=start, has_arr=np.zeros(N, np.uint8), arr_f=np.zeros((N, 10)),
+                     start=start, has_arr=np.zeros(N, np.uint8), arr_f=np.zeros((N, 12)),
                      arr_i=np.zeros((N, 6), np.int32), arr_vis=np.zeros((N, 3), np.uint8),
-                     arr_ev=np.zeros((N, M), np.int32), em_f=np.zeros((N, 12)),
+                     arr_ev=np.zeros((N, M), np.int32), em_f=np.zeros((N, 14)),
                      em_i=np.zeros((N, 5), np.int32), last_T=np.full(N, -1.0))
         if xp is not np:
             state = {k: xp.asarray(v) for k, v in state.items()}
@@ -469,7 +470,8 @@ class FastSimulation:
                 dt_spin=fs[first, 6].copy(),
                 K=k[first] + valley_center(valley[first], eqv[first], sim.material.a_lat),
                 band_edge_at_surface=float(sim.field.band_edge(np.array([0.0]))[0]),
-                mechanism_names=sim.names, n_back=ist[first, 6].astype(np.int32)))
+                mechanism_names=sim.names, n_back=ist[first, 6].astype(np.int32),
+                x=fs[first, 7].copy(), y=fs[first, 8].copy()))
         ist[:, 5] += 1
         if sim.surface_model is None:
             ist[:, 3] = SURFACE
@@ -486,7 +488,8 @@ class FastSimulation:
                     spin0=host.spin0[ie].copy(), z0=host.z0[ie].copy(), E0=host.E0[ie].copy(),
                     band=host.band[ie].copy(), n_surface=ist[em, 5].astype(np.int32),
                     pid=host.pid[ie].copy(), p_vac=np.asarray(info["p_vac"])[em].copy(),
-                    E_vac=np.asarray(info["E_vac_kin"])[em].copy(), n_back=ist[em, 6].astype(np.int32)))
+                    E_vac=np.asarray(info["E_vac_kin"])[em].copy(), n_back=ist[em, 6].astype(np.int32),
+                    x=fs[em, 7].copy(), y=fs[em, 8].copy()))
                 ist[em, 3] = EMITTED
             ist[outcome == TRAP, 3] = TRAPPED
             rf = outcome == REFLECT
@@ -507,7 +510,7 @@ class FastSimulation:
                        band=host.band, dt_spin=fs[:, 6].copy(), n_flips=ist[:, 4].astype(np.int32),
                        pid=host.pid, time_in_valley=h["tiv"], visited=h["vis"].astype(bool),
                        eqv=ist[:, 1].astype(np.int8), n_surface=ist[:, 5].astype(np.int32),
-                       n_back=ist[:, 6].astype(np.int32))
+                       n_back=ist[:, 6].astype(np.int32), x=fs[:, 7].copy(), y=fs[:, 8].copy())
         M = len(sim.mechanisms)
         a_lat = sim.material.a_lat
         if self.mode != SURF_HOST:              # records written by the kernel
@@ -521,7 +524,7 @@ class FastSimulation:
                 n_events=h["arr_ev"][sel], pid=host.pid[sel].copy(), time_in_valley=af[:, 7:10].copy(),
                 visited=h["arr_vis"][sel].astype(bool), eqv=eqv, dt_spin=af[:, 6].copy(),
                 K=af[:, 2:5] + valley_center(valley, eqv, a_lat), mechanism_names=sim.names,
-                n_back=ai[:, 5].astype(np.int32))]
+                n_back=ai[:, 5].astype(np.int32), x=af[:, 10].copy(), y=af[:, 11].copy())]
             if self.mode == SURF_C21:
                 sel = np.flatnonzero(ist[:, 3] == EMITTED)
                 ef, ei = h["em_f"][sel], h["em_i"][sel]
@@ -531,7 +534,7 @@ class FastSimulation:
                     spin=ei[:, 2].astype(np.int8), spin0=host.spin0[sel].copy(), z0=host.z0[sel].copy(),
                     E0=host.E0[sel].copy(), band=host.band[sel].copy(), n_surface=ei[:, 3].astype(np.int32),
                     pid=host.pid[sel].copy(), p_vac=ef[:, 8:11].copy(), E_vac=ef[:, 11].copy(),
-                    n_back=ei[:, 4].astype(np.int32))]
+                    n_back=ei[:, 4].astype(np.int32), x=ef[:, 12].copy(), y=ef[:, 13].copy())]
         arr = SurfaceArrivals.concatenate(arrivals, M, sim.names)
         arr.band_edge_at_surface = float(sim.field.band_edge(np.array([0.0]))[0])
         em = Emissions.concatenate(emissions) if self.models else None

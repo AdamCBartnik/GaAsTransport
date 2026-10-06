@@ -13,10 +13,10 @@ Coordinates of the ParticleGroup (output convention only; the simulation itself 
   * px, py, pz: vacuum momentum just outside the surface model [eV/c] (C21 surface: transverse
     crystal momentum folded into the surface Brillouin zone and conserved, energy from the vacuum
     level). Image-charge acceleration, space charge and any applied field are not included.
-  * x, y: the transport is one-dimensional in space (lateral motion inside the GaAs is not tracked).
-    x, y are drawn from the laser spot: a point (sigma_xy = 0, default) or a round Gaussian of rms
-    sigma_xy [m] per axis. Lateral diffusion inside the cathode (~ the diffusion length, sub-um to um
-    for these times) is therefore not in the output.
+  * x, y = (excitation point in the laser spot) + (lateral displacement inside the GaAs between
+    excitation and emission). The excitation point is drawn from a round Gaussian of rms sigma_xy [m]
+    per axis (sigma_xy = 0: a point source, so x, y show the lateral diffusion alone). The lateral
+    displacement is tracked during transport (bookkeeping: the sample is laterally homogeneous).
   * weight [C]: total_charge / N_emitted per macroparticle if total_charge is given, otherwise the
     electron charge (each macroparticle is one electron).
   * status = 1, species = "electron", id = the simulation's particle id.
@@ -47,11 +47,12 @@ def to_particle_group(emissions, sigma_xy=0.0, rng=None, total_charge=None):
     if n == 0:
         raise ValueError("no emitted electrons")
     p = np.asarray(emissions.p_vac, float) * C_LIGHT / Q_E            # kg m/s -> eV/c
+    x = np.asarray(emissions.x, float).copy() if emissions.x is not None else np.zeros(n)
+    y = np.asarray(emissions.y, float).copy() if emissions.y is not None else np.zeros(n)
     if sigma_xy > 0:
         rng = rng if rng is not None else np.random.default_rng()
-        x, y = rng.normal(0.0, sigma_xy, n), rng.normal(0.0, sigma_xy, n)
-    else:
-        x = y = np.zeros(n)
+        x += rng.normal(0.0, sigma_xy, n)
+        y += rng.normal(0.0, sigma_xy, n)
     weight = (total_charge / n) if total_charge is not None else Q_E
     data = dict(x=x, px=p[:, 0], y=y, py=p[:, 1],
                 z=np.zeros(n), pz=-p[:, 2],                             # output convention: beam along +z
