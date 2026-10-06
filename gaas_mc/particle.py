@@ -32,6 +32,7 @@ class Ensemble:
     pid: np.ndarray        # particle id
     time_in_valley: np.ndarray   # (n, 3) time spent in Gamma, L, X [s]
     visited: np.ndarray          # (n, 3) bool, valley ever occupied
+    eqv: np.ndarray              # int8: which equivalent valley (L: 0-3, X: 0-2, Gamma: 0), see valleys.py
 
     @classmethod
     def create(cls, z, k, E, spin, valley=0, t=0.0):
@@ -46,7 +47,7 @@ class Ensemble:
             status=np.full(n, ALIVE, np.int8), z0=z.copy(), E0=E.copy(), spin0=spin.copy(),
             band=np.full(n, -1, np.int8), dt_spin=np.zeros(n), n_flips=np.zeros(n, np.int32),
             pid=np.arange(n), time_in_valley=np.zeros((n, 3)),
-            visited=np.eye(3, dtype=bool)[np.full(n, valley)],
+            visited=np.eye(3, dtype=bool)[np.full(n, valley)], eqv=np.zeros(n, np.int8),
         )
 
     def __len__(self):

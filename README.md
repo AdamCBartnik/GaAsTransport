@@ -22,6 +22,7 @@ physics is applied, so these records can be handed to a separate surface/interfa
 | B | ionized impurity (Brooks–Herring); electron–hole with an hh+lh Fermi–Dirac bath, exact kinematics, FD Pauli blocking | done, validated |
 | C | L, X valleys; intervalley (Eq. 33, DOS factor in numerator); spin frozen in L/X with residence-time bookkeeping | done, validated |
 | D | C21 band bending (Eqs. 56–62); user potentials; hybrid direct / null-collision flights; adaptive Verlet step | done, validated |
+| D′ | Depletion region: local mobile holes (global E_F), local screening of impurity/POP/e–h, local BAP; valley identity + full crystal momentum at arrival | done, validated |
 | E | optional C21 surface barrier, for benchmarking only | todo |
 
 ## Running
@@ -39,6 +40,7 @@ PYTHONPATH=. python validation/fig9_drift_velocity.py <N> <p_cm3>     # C21 Fig.
 PYTHONPATH=. python validation/fig14_spin_relaxation_time.py <N> <p_cm3> <pauli>   # C21 Fig. 14
 PYTHONPATH=. python validation/stage_d_band_bending.py fast   # C21 Figs. 16, 17 + integrator accuracy
 PYTHONPATH=. python validation/stage_d_band_bending.py run <p> <hv> <N>; ... plot   # C21 Fig. 20
+PYTHONPATH=. python validation/depletion.py profiles | inject | compare   # depletion-region diagnostics
 PYTHONPATH=. python examples/surface_arrivals.py [N] [p_cm3] [hv_eV]
 ```
 
@@ -59,11 +61,12 @@ from gaas_mc.fields import C21BandBending
 
 a = ModelAssumptions()                         # defaults; see docs/MODEL_ASSUMPTIONS.md
 s = Sample(gaas_chubenko2021(), per_cm3(1e19))
-mech = build_mechanisms(s, a, stage="C")       # drop list entries to disable mechanisms
+field = C21BandBending(s)
+mech = build_mechanisms(s, a, stage="C", field=field)   # field -> local depletion-region rates
 spin = SpinModel(s, [m for m in mech if m.valley_from == 0])
 rng = np.random.default_rng(1)
 ens = photoexcite(s, ev(1.6), 10_000, rng, assumptions=a)          # Casey 1975 + Adachi 1989 absorption
-res = Simulation(s, mech, spin, field=C21BandBending(s), t_max=370 * PS, assumptions=a).run(ens, rng)
+res = Simulation(s, mech, spin, field=field, t_max=370 * PS, assumptions=a).run(ens, rng)
 res.arrivals.save_npz("arrivals.npz")          # t, E, k, valley, spin, z0, n_events, time_in_valley, ...
 print(res.arrivals.upper_valley_summary())
 ```

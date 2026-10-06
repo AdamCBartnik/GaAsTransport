@@ -115,3 +115,46 @@ Observations:
   arrivals that visited L/X and those that did not is mostly a selection effect (hot hh-band, spin +1
   electrons transfer more often), not relaxation.
 * **Run time:** about 20–25 min per 1e19 run (3000 electrons, 300 ps), dominated by impurity and e–h events.
+
+## Depletion-region scattering: local mobile holes (`validation/depletion.py`)
+
+**Profiles versus z** (`depletion_profiles.png`; p = 1e19 and 5e17 cm⁻³, C21 band bending):
+* p(z)/p_bulk falls to 3e-12 (1e19) and 3e-11 (5e17) at the surface.
+* The accepted e–h rate follows p(z), dropping by about 8 orders of magnitude.
+* β(z) is unchanged at 1e19 with the default cap, because the bulk screening length (4.7 nm) already
+  exceeds the acceptor spacing (2.9 nm). At 5e17 the screening length grows from 6.1 to 7.8 nm. With
+  the W_bb cap it can reach 9.9 nm and 42 nm.
+* The ionized-impurity rate is unchanged at 1e19 with the default cap and up to 2× higher at 5e17.
+  With the W_bb cap it is up to 6× (1e19) and 30× (5e17) higher at low energy.
+* τ_BAP grows by many orders of magnitude toward the surface.
+
+**Targeted transit test** (`depletion.py inject`): 20 000 thermal Γ electrons with spin +1 start at
+z = W_bb and are followed for 10 ps. σ(ESP) ≈ 0.001, σ(⟨E⟩) ≈ 0.7 meV, σ(fraction) ≈ 0.3%.
+
+| p (cm⁻³) | variant | Γ / L / X arrivals | ESP | ⟨E_Γ⟩ (meV) | ⟨cos θ⟩_Γ | ⟨t⟩, direct transits (fs) | e–h events / arrival | ii events / arrival |
+|---|---|---|---|---|---|---|---|---|
+| 1e19 | bulk (C21-like) | 81.0 / 10.8 / 8.3% | 0.9929 | 728.8 | 0.963 | 94 | 27.8 | 44.6 |
+| 1e19 | local, cap = impurity spacing | 80.6 / 10.8 / 8.6% | 0.9919 | 734.7 | 0.970 | 95 | 26.7 | 44.2 |
+| 1e19 | local, cap = W_bb | 80.2 / 11.0 / 8.8% | 0.9943 | 733.5 | 0.961 | 93 | 27.7 | 50.6 |
+| 5e17 | bulk | 52.7 / 30.5 / 16.8% | 0.9732 | 659.3 | 0.955 | 222 | 8.8 | 10.4 |
+| 5e17 | local, cap = impurity spacing | 52.7 / 31.0 / 16.4% | 0.9722 | 659.5 | 0.956 | 222 | 8.4 | 11.4 |
+| 5e17 | local, cap = W_bb | 52.2 / 31.2 / 16.7% | 0.9842 | 656.5 | 0.948 | 222 | 8.3 | 48.9 |
+
+**Full photoemission comparison** (`depletion.py compare`, 8 cases × 3 variants, N = 3000 each, common
+random numbers; `depletion_compare.txt`, `depletion_compare_p*.png`). All differences are within
+statistics (σ ≈ 1.5% for fractions, σ(ESP) ≈ 0.04 for ~700 arrivals at 1e19) except one: at 1e19 the
+Γ arrival energy is 2–9 meV higher with the local model, consistently, and the bulk model's
+600–700 meV tail of electrons that collided with holes inside the band bending disappears.
+
+**Conclusions**
+* For the C21 band bending the depletion region is crossed in about 0.1 ps (1e19) to 0.2 ps (5e17).
+  With bulk rates an electron makes ≈ 1 (1e19) or ≈ 0.4 (5e17) e–h collision on the way. The local model
+  removes these, so Γ arrivals are about 6 meV hotter at 1e19, with a narrower distribution and slightly
+  more forward-directed.
+* Valley fractions, response times and ESP are essentially unchanged with the default cap. Spin loss
+  in the transit is below 1% (1e19) to 3% (5e17), and BAP is too slow (≥ 100 ps) to matter over 0.1 ps
+  even in the bulk.
+* The screening cap is the most consequential remaining choice at moderate doping. With the W_bb cap,
+  the 5e17 transit has 5× more impurity events, a slightly broader angular distribution, and *less* spin
+  loss (0.984 vs 0.972 ESP). More momentum scattering suppresses D'yakonov–Perel relaxation (motional
+  narrowing).

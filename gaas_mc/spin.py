@@ -40,6 +40,10 @@ class SpinModel:
     enable_DP: bool = True
     enable_BAP: bool = True
 
+    def rebuild(self, sample, mechanisms):
+        """Same switches for another (e.g. local) sample and mechanism set."""
+        return SpinModel(sample, mechanisms, self.enable_EY, self.enable_DP, self.enable_BAP)
+
     def __post_init__(self):
         mat = self.sample.material
         self.m = mat.gamma.m_eff

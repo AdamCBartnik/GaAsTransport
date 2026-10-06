@@ -54,6 +54,7 @@ class Material:
     B_DP: float = 10 * HBAR**2 / (2 * M0)        # [J m^2]
     Delta_exc: float = 47e-6 * EV                 # [J]
     psi0_sq: float = 1.0                          # |psi(0)|^2
+    a_lat: float = 5.65325e-10                    # lattice constant [m], 300 K (Blakemore 1982, C21 ref. 29)
 
     @property
     def gamma(self) -> Valley:

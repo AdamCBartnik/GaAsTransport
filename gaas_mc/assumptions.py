@@ -55,6 +55,19 @@ class ModelAssumptions:
     """Spin in L/X: "frozen" = spin preserved, zero additional relaxation. No other option is
     implemented by design: Gamma-valley EY/DP/BAP must not be applied to L/X by analogy."""
 
+    # --- depletion region (band-bending field) ---------------------------------------------------
+    depletion_scattering: str = "local"
+    """"local" (default): hole-density-dependent processes use the local mobile-hole population
+    p(z) from the global Fermi level and the local valence-band shift (gaas_mc/depletion.py):
+    e-h scattering, BAP, and the screening of impurity (and POP) scattering. N_A^- stays at the
+    dopant density. "bulk": the earlier C21-like behaviour (bulk rates everywhere), kept for comparison."""
+    depletion_screening_cap: object = "impurity_spacing"
+    """Upper bound on the local screening length, which otherwise diverges as p(z) -> 0:
+    "impurity_spacing" (acceptor Wigner-Seitz radius), "band_bending_width" (W_bb), or a length [m].
+    It is always max'ed with the bulk length, so the bulk is unchanged."""
+    depletion_pop_screening: bool = True
+    """Use the local hole screening in the screened POP rate (C21 Eq. 25 contains the hole beta)."""
+
     # --- momentum scattering details ----------------------------------------------------------
     pop_angle: str = "chubenko_eq30"                 # or "screened"
 
@@ -79,10 +92,15 @@ class ModelAssumptions:
             "side_valley_spin": ("frozen",),
             "pop_angle": ("chubenko_eq30", "screened"),
             "flight_mode": ("auto", "direct", "self_scattering"),
+            "depletion_scattering": ("local", "bulk"),
         }
         for k, opts in allowed.items():
             if getattr(self, k) not in opts:
                 raise ValueError(f"{k}={getattr(self, k)!r}; allowed: {opts}")
+        cap = self.depletion_screening_cap
+        if not (cap in ("impurity_spacing", "band_bending_width") or
+                (isinstance(cap, (int, float)) and cap > 0)):
+            raise ValueError(f"depletion_screening_cap={cap!r}")
         if not set(self.hole_bands) <= {"hh", "lh"} or not self.hole_bands:
             raise ValueError("hole_bands must be a non-empty subset of ('hh', 'lh')")
         return self

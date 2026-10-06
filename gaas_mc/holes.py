@@ -14,6 +14,12 @@ Model (docs/MODEL_ASSUMPTIONS.md):
   * The split-off band is neglected (Delta_so >> kT).
 This hole chemical potential is used only for e-h scattering. The C21 prescriptions for band
 bending (Eq. 58, single band) and for BAP (Eq. 44) are kept unchanged where C21 uses them.
+
+Depletion region (Stage D'): the Fermi level is global. Where the bands are shifted by
+phi = E_C(z) - E_C(bulk) (< 0 with downward bending), the valence bands shift by the same phi, so
+the reduced chemical potential is eta(z) = eta_bulk + phi/kT. ``HoleGas.local(phi)`` returns the
+hole gas at that position (densities, occupation, samplers); ``susceptibility`` is
+chi = dp/dmu = sum_b N_b F_{-1/2}(eta) / kT, which sets the screening.
 """
 from __future__ import annotations
 
@@ -43,8 +49,26 @@ def fermi_integral_half(eta):
     return 2 / np.sqrt(np.pi) * val
 
 
+def fermi_integral_minus_half(eta):
+    """Normalized F_{-1/2}(eta) = (1/sqrt(pi)) Int_0^inf x^(-1/2)/(1+exp(x-eta)) dx = dF_{1/2}/deta."""
+    if eta < 0:
+        def g(t):
+            return np.exp(-t * t) / (1 + np.exp(eta - t * t))
+        val = integrate.quad(g, 0.0, np.sqrt(60.0), epsabs=0, epsrel=1e-11, limit=200)[0]
+        return 2 / np.sqrt(np.pi) * np.exp(eta) * val
+    t_edge, t_max = np.sqrt(eta), np.sqrt(eta + 60.0)
+
+    def g(t):
+        return 0.5 * (1 - np.tanh(0.5 * (t * t - eta)))
+    val = sum(integrate.quad(g, a, b, epsabs=0, epsrel=1e-11, limit=200)[0]
+              for a, b in ((0.0, t_edge), (t_edge, t_max)) if b > a)
+    return 2 / np.sqrt(np.pi) * val
+
+
 class HoleGas:
-    def __init__(self, sample, bands_=("hh", "lh"), statistics="fermi_dirac"):
+    def __init__(self, sample, bands_=("hh", "lh"), statistics="fermi_dirac", eta=None):
+        """Equilibrium hole gas of `sample`. With eta=None the chemical potential is solved from the
+        bulk p; otherwise the given reduced chemical potential is used (local gas, see local())."""
         self.sample = sample
         self.kT = sample.kT
         self.bands = tuple(bands_)
@@ -53,18 +77,28 @@ class HoleGas:
         self.mass = {b: getattr(mat, BAND_MASS_ATTR[b]) for b in self.bands}
         self.N_eff = {b: 2 * (m * self.kT / (2 * np.pi * HBAR**2)) ** 1.5 for b, m in self.mass.items()}
         Ntot = sum(self.N_eff.values())
-        if statistics == "fermi_dirac":
-            self.eta = optimize.brentq(lambda e: Ntot * fermi_integral_half(e) - sample.p, -60, 200,
-                                       xtol=1e-13, rtol=1e-13)
-            Fh = fermi_integral_half(self.eta)
-        elif statistics == "maxwell_boltzmann":
-            self.eta = float(np.log(sample.p / Ntot))
-            Fh = np.exp(self.eta)
-        else:
+        if statistics not in ("fermi_dirac", "maxwell_boltzmann"):
             raise ValueError(statistics)
+        if eta is None:
+            if statistics == "fermi_dirac":
+                eta = optimize.brentq(lambda e: Ntot * fermi_integral_half(e) - sample.p, -60, 200,
+                                      xtol=1e-13, rtol=1e-13)
+            else:
+                eta = float(np.log(sample.p / Ntot))
+        self.eta = float(eta)
+        if statistics == "fermi_dirac":
+            Fh, Fmh = fermi_integral_half(self.eta), fermi_integral_minus_half(self.eta)
+        else:
+            Fh = Fmh = np.exp(self.eta)
         self.mu = self.eta * self.kT
         self.density = {b: self.N_eff[b] * Fh for b in self.bands}
+        self.p = sum(self.density.values())
+        self.susceptibility = Ntot * Fmh / self.kT          # dp/dmu [1/(J m^3)]
         self._build_samplers()
+
+    def local(self, phi):
+        """Hole gas where the bands are shifted by phi [J] (phi < 0: bent down, holes depleted)."""
+        return HoleGas(self.sample, self.bands, self.statistics, eta=self.eta + phi / self.kT)
 
     def occupation(self, E):
         """f(E_h) for hole kinetic energy E_h >= 0 [J]."""

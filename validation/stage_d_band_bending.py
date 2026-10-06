@@ -4,11 +4,11 @@
          - Fig. 16: E_bb(p) and W_bb(p); C21 quotes E_bb = 0.694 eV, W_bb = 9.947 nm at 1e19 cm^-3
          - Fig. 17: E_C(z) and E_z(z) at 1e19 cm^-3
          - energy conservation of the velocity-Verlet integrator across the band bending
-  run    python validation/stage_d_band_bending.py run <p_cm3> <hv_eV> <N>
+  run    python validation/stage_d_band_bending.py run <p_cm3> <hv_eV> <N> [bulk|local|local_w]
          full Stage C bulk model + band bending, absorbing surface, 300 ps; snapshots at 0/100/300 ps
          (C21 Fig. 20: depth distribution of electrons still inside) and the surface-arrival
          ensemble -> validation/out/stageD_<p>_<hv>.npz
-  plot   python validation/stage_d_band_bending.py plot
+  plot   python validation/stage_d_band_bending.py plot [variant]
          Fig. 20-style histograms + arrival energy / time / ESP summary from the saved runs
 
 C21 removes electrons that reach the surface and are trapped or emitted; only those reflected by the
@@ -85,21 +85,31 @@ def fast():
             print(f"  p={p:.1e} dt={dt:4.2f} fs: max |dE| = {np.abs(err).max():.3f} meV (mean {err.mean():+.3f})")
 
 
-def run(p, hv, n):
-    a = ModelAssumptions()
+VARIANTS = {"bulk": dict(depletion_scattering="bulk"),
+            "local": dict(depletion_scattering="local"),
+            "local_w": dict(depletion_scattering="local", depletion_screening_cap="band_bending_width")}
+
+
+def run(p, hv, n, variant="local"):
+    """variant: "bulk" (bulk rates in the depletion region, C21-like), "local" (local mobile holes,
+    screening cap = impurity spacing), "local_w" (local, cap = W_bb). The same seed is used for every
+    variant (common random numbers: identical initial ensembles)."""
+    a = ModelAssumptions(**VARIANTS[variant])
     s = Sample(MAT, per_cm3(p))
-    mech = build_mechanisms(s, a, "C")
+    field = C21BandBending(s)
+    mech = build_mechanisms(s, a, "C", field=field)
     sm = SpinModel(s, [m for m in mech if m.valley_from == 0])
     rng = np.random.default_rng(int(p / 1e15) + int(hv * 1000))
     ens = photoexcite(s, ev(hv), n, rng, assumptions=a)
     times = np.array([0, 100, 300]) * PS
-    sim = Simulation(s, mech, sm, field=C21BandBending(s), t_max=300 * PS, snapshot_times=times, assumptions=a)
+    sim = Simulation(s, mech, sm, field=field, t_max=300 * PS, snapshot_times=times, assumptions=a)
     t0 = time.time()
     r = sim.run(ens, rng)
     arr = r.arrivals
-    tag = f"stageD_p{p:.0e}_hv{hv:.2f}"
+    tag = f"stageD_p{p:.0e}_hv{hv:.2f}_{variant}"
     np.savez(OUT / f"{tag}.npz", times=times, z=r.snapshots.z, valley=r.snapshots.valley, z0=ens.z,
-             arr_t=arr.t, arr_E=arr.E, arr_k=arr.k, arr_spin=arr.spin, arr_valley=arr.valley,
+             arr_t=arr.t, arr_E=arr.E, arr_k=arr.k, arr_K=arr.K, arr_eqv=arr.eqv, arr_spin=arr.spin,
+             arr_valley=arr.valley,
              arr_visited=arr.visited, arr_tv=arr.time_in_valley, arr_spin0=arr.spin0, arr_z0=arr.z0,
              esp0=ens.esp(), n=n, E_bb=s.E_bb, W_bb=s.W_bb, Eg=s.Eg)
     print(f"{tag}: N={n}, arrived {len(arr) / n:.1%}, ESP0 {ens.esp():.3f} -> ESP(arrival) {arr.esp():.3f}, "
@@ -109,14 +119,15 @@ def run(p, hv, n):
 
 
 def plot():
-    files = sorted(OUT.glob("stageD_p*_hv*.npz"))
+    variant = sys.argv[2] if len(sys.argv) > 2 else "local"
+    files = sorted(OUT.glob(f"stageD_p*_hv*_{variant}.npz"))
     if not files:
         print("no runs found"); return
     fig, axs = plt.subplots(2, 4, figsize=(18, 8))
     hvs = (1.45, 1.60, 1.75, 1.90)
     for row, p in enumerate((1e19, 5e17)):
         for col, hv in enumerate(hvs):
-            f = OUT / f"stageD_p{p:.0e}_hv{hv:.2f}.npz"
+            f = OUT / f"stageD_p{p:.0e}_hv{hv:.2f}_{variant}.npz"
             ax = axs[row, col]
             if not f.exists():
                 ax.set_visible(False); continue
@@ -129,7 +140,7 @@ def plot():
             ax.set_title(f"p = {p:.0e}, hv = {hv:.2f} eV (cf. C21 Fig. 20)", fontsize=9)
             ax.set_xlabel("z, um"); ax.set_ylabel("electrons / (N * um)")
             ax.legend(fontsize=7, frameon=False)
-    dg.save(fig, OUT / "stageD_fig20.png")
+    dg.save(fig, OUT / f"stageD_fig20_{variant}.png")
     print("run                 arrived  ESP0   ESP_arr  <E_arr>  median_t  visited_L/X  arrive_in_L/X  "
           "<t_L/X | visited>  <t_L/X>/<t_total>")
     lines = []
@@ -150,7 +161,7 @@ def plot():
                 line += f"   ESP(visited) {d['arr_spin'][vis].mean():.3f} / ESP(not) {d['arr_spin'][~vis].mean():.3f}"
         print(line)
         lines.append(line)
-    (OUT / "stageD_summary.txt").write_text(chr(10).join(lines) + chr(10))
+    (OUT / f"stageD_summary_{variant}.txt").write_text(chr(10).join(lines) + chr(10))
 
 
 if __name__ == "__main__":
@@ -158,6 +169,6 @@ if __name__ == "__main__":
     if cmd == "fast":
         fast()
     elif cmd == "run":
-        run(float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]))
+        run(float(sys.argv[2]), float(sys.argv[3]), int(sys.argv[4]), sys.argv[5] if len(sys.argv) > 5 else "local")
     elif cmd == "plot":
         plot()

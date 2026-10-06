@@ -54,6 +54,8 @@ import numpy as np
 
 from . import bands
 from .assumptions import DEFAULT
+from .depletion import LocalMechanism
+from .valleys import choose_equivalent_valley, valley_center
 from .constants import EV, FS, HBAR, PS, Q_E
 from .fields import NoField
 from .particle import ALIVE, BACK, SURFACE, TIMEOUT, Ensemble
@@ -127,6 +129,12 @@ class Simulation:
         self.dt_max = float(dt_max_field) if dt_max_field is not None else self._auto_field_step()
         self.snapshot_times = np.sort(np.asarray(snapshot_times, float))
         self.log_events = log_events
+        depls = {id(m.depletion): m.depletion for m in self.mechanisms if isinstance(m, LocalMechanism)}
+        if len(depls) > 1:
+            raise ValueError("all local mechanisms must share one depletion model")
+        self.depl = next(iter(depls.values())) if depls else None
+        if self.depl is not None and self.depl.field is not self.field:
+            raise ValueError("the mechanisms' depletion model was built for a different field")
         self._build_tables(E_table_max, n_table, gamma0_margin)
 
     def _auto_field_step(self, eta=0.05, cap=2 * FS):
@@ -159,17 +167,35 @@ class Simulation:
                                for v in range(nv)]
         self.rate_table = np.array([m.rate(self.E_grid) for m in self.mechanisms]).reshape(
             len(self.mechanisms), n)
+        self.is_local = np.array([isinstance(m, LocalMechanism) for m in self.mechanisms], bool)
+        for i in np.flatnonzero(self.is_local):
+            self.mechanisms[i].tabulate(self.E_grid)       # (n_phi, n_E); last row = bulk
         self.gamma0 = np.zeros(nv)
         for v, idx in enumerate(self.mech_by_valley):
-            if idx:
-                self.gamma0[v] = margin * self.rate_table[idx].sum(axis=0).max()
-        # spin relaxation: Gamma valley only; L/X frozen (zero), see side_valley_spin
-        self.inv_tau_s = np.zeros((nv, n))
+            if not idx:
+                continue
+            tot = self.rate_table[idx].sum(axis=0)
+            if self.depl is not None:                       # bound over every local potential too
+                loc = [i for i in idx if self.is_local[i]]
+                fixed = sum((self.rate_table[i] for i in idx if not self.is_local[i]), np.zeros(n))
+                tot = (fixed[None, :] + sum(self.mechanisms[i].table for i in loc)).max(axis=0)
+            self.gamma0[v] = margin * tot.max()
+        # spin relaxation: Gamma valley only; L/X frozen (zero), see side_valley_spin.
+        # With the depletion model the Gamma table depends on the local potential: (n_phi, n_E).
+        n_phi = self.depl.n if self.depl is not None else 1
+        self.inv_tau_s = np.zeros((nv, n_phi, n))
         if self.spin_model is not None:
-            self.inv_tau_s[0] = self.spin_model.total(self.E_grid)
+            if self.depl is not None and hasattr(self.spin_model, "rebuild"):
+                for j in range(n_phi):
+                    mech_j = [m.variants[j] if isinstance(m, LocalMechanism) else m
+                              for m in self.mechanisms if m.valley_from == 0]
+                    self.inv_tau_s[0, j] = self.spin_model.rebuild(self.depl.samples[j], mech_j).total(self.E_grid)
+            else:
+                self.inv_tau_s[0, :] = self.spin_model.total(self.E_grid)[None, :]
 
-    def rates_at(self, E, valley_index):
-        """Interpolated rate matrix (M_v, n) for the mechanisms of one valley."""
+    def rates_at(self, E, valley_index, fi=None):
+        """Interpolated rate matrix (M_v, n) for the mechanisms of one valley. fi: fractional index
+        of the local potential (depletion model) per particle; None or no depletion model = bulk."""
         idx = self.mech_by_valley[valley_index]
         E = np.atleast_1d(E)
         # one bracket search for all mechanisms (same as np.interp per row, with end clamping)
@@ -178,7 +204,16 @@ class Simulation:
         w = np.clip((E - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
         T = self.rate_table[idx]
         R = T[:, j - 1] * (1 - w) + T[:, j] * w
+        if fi is not None and self.depl is not None:
+            for row, i in enumerate(idx):
+                if self.is_local[i]:
+                    r0, r1, ww, _, _ = self.mechanisms[i].rates_at(E, fi)
+                    R[row] = (1 - ww) * r0 + ww * r1
         return np.where(E[None, :] > self.thresholds[idx][:, None], R, 0.0)
+
+    def phi_index(self, z):
+        """Fractional local-potential index (None without a depletion model)."""
+        return None if self.depl is None else self.depl.frac_index(z)
 
     # ------------------------------------------------------------------------------------
     # Free flight
@@ -435,18 +470,31 @@ class Simulation:
 
     def _spin_flip(self, ens, ii, rng):
         """Eq. 54 for particles ii, with dt = ens.dt_spin; resets dt_spin."""
-        inv = self._inv_tau_s_at(ens.E[ii], ens.valley[ii])
+        inv = self._inv_tau_s_at(ens.E[ii], ens.valley[ii], self.phi_index(ens.z[ii]))
         P = flip_probability(ens.dt_spin[ii], inv)
         flip = rng.random(ii.size) < P
         ens.spin[ii[flip]] *= -1
         ens.n_flips[ii[flip]] += 1
         ens.dt_spin[ii] = 0.0
 
-    def _inv_tau_s_at(self, E, valley):
+    def _inv_tau_s_at(self, E, valley, fi=None):
         out = np.zeros_like(E)
+        T = self.inv_tau_s
         for vv in np.unique(valley):
             sel = valley == vv
-            out[sel] = np.interp(E[sel], self.E_grid, self.inv_tau_s[vv])
+            if fi is None or T.shape[1] == 1:
+                out[sel] = np.interp(E[sel], self.E_grid, T[vv, -1])
+                continue
+            f = fi[sel]
+            i0 = np.clip(np.floor(f).astype(int), 0, T.shape[1] - 1)
+            i1 = np.minimum(i0 + 1, T.shape[1] - 1)
+            w = f - i0
+            g = self.E_grid
+            j = np.clip(np.searchsorted(g, E[sel], side="right"), 1, g.size - 1)
+            u = np.clip((E[sel] - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
+            r0 = T[vv, i0, j - 1] * (1 - u) + T[vv, i0, j] * u
+            r1 = T[vv, i1, j - 1] * (1 - u) + T[vv, i1, j] * u
+            out[sel] = (1 - w) * r0 + w * r1
         return out
 
     def _scatter(self, ens, isc, G, rng, n_events, n_real, n_rej, log):
@@ -460,7 +508,8 @@ class Simulation:
             in_v = v_before == vv
             iv = isc[in_v]
             mech_idx = self.mech_by_valley[vv]
-            R = self.rates_at(ens.E[iv], vv)                     # (M_v, n)
+            fi_v = self.phi_index(ens.z[iv])
+            R = self.rates_at(ens.E[iv], vv, fi_v)               # (M_v, n)
             cum = np.cumsum(R, axis=0)
             Gv = G[in_v]
             if np.any(cum[-1] > Gv * (1 + 1e-9)):
@@ -477,7 +526,11 @@ class Simulation:
                     continue
                 mech = self.mechanisms[mi]
                 E_before = ens.E[sel].copy()
-                k_new, accepted, v_new = mech.scatter(ens.k[sel], E_before, rng)
+                if self.is_local[mi]:
+                    k_new, accepted, v_new = mech.scatter(ens.k[sel], E_before, rng,
+                                                          phi_index=fi_v[choice == j])
+                else:
+                    k_new, accepted, v_new = mech.scatter(ens.k[sel], E_before, rng)
                 acc = sel[accepted]
                 n_rej[mi] += int((~accepted).sum())
                 n_self += int((~accepted).sum())
@@ -486,7 +539,10 @@ class Simulation:
                 # spin flip (Eq. 54) evaluated with the pre-scattering state
                 self._spin_flip(ens, acc, rng)
                 ens.k[acc] = k_new[accepted]
+                v_old = ens.valley[acc].copy()
                 ens.valley[acc] = v_new[accepted]
+                if getattr(mech, "valley_to", None) is not None:      # intervalley: which equivalent valley
+                    ens.eqv[acc] = choose_equivalent_valley(v_old, ens.eqv[acc], ens.valley[acc], rng)
                 ens.visited[acc, ens.valley[acc]] = True
                 m, a = self._valley_params(ens.valley[acc])
                 ens.E[acc] = bands.E_of_k(np.linalg.norm(ens.k[acc], axis=1), m, a)
@@ -528,5 +584,7 @@ class Simulation:
             E0=ens.E0[ih].copy(), band=ens.band[ih].copy(), n_flips=ens.n_flips[ih].copy(),
             n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
             time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
+            eqv=ens.eqv[ih].copy(),
+            K=ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat),
             band_edge_at_surface=float(self.field.band_edge(np.array([0.0]))[0]),
             mechanism_names=self.names)

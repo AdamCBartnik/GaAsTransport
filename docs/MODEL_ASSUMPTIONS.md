@@ -193,7 +193,7 @@ These numbers indicate whether a literature-based L/X spin model is needed.
 | Profile | `fields.C21BandBending(sample)`: E_C(z) = E_Cb − E_bb(1 − z/W_bb)² for z < W_bb (Eq. 61), E_z = 2E_bb/(eW_bb)·(1 − z/W_bb) (Eq. 62) | E_bb = E_g/2 − E_F^b, with the surface Fermi level pinned mid-gap (Eqs. 56–58); W_bb from Eq. 59. Both can be overridden. Reproduces C21's 0.694 eV / 9.947 nm at 1e19. |
 | User potential | `fields.PotentialField(E_C_fn, z_max=...)` or `CallableField(Ez_fn, band_edge_fn, z_max=...)` | For replacing C21's profile with your own electrostatics or image-charge model. |
 | Valleys | All valleys shift rigidly with E_C(z) | The tracked E is the kinetic energy above the local valley minimum. |
-| Scattering in the band-bending region | Identical to the bulk (C21 Sec. IV) | Physically the region is depleted of holes, so e–h scattering, BAP, and screening should all change there. **Not modelled** (same as C21); worth revisiting for the 10–75 nm region. |
+| Scattering in the band-bending region | **Local mobile holes** (§6b); `depletion_scattering="bulk"` keeps bulk rates everywhere (C21-like) for comparison | — |
 | Flights | `"auto"` = hybrid: direct W_total(E) for z ≥ z_max, null-collision with a constant bound inside the field region. Flights are stopped at z = z_max (exact by memorylessness). | `Result.flight_mode` reports `"hybrid"`. |
 | Integrator | Velocity Verlet (kick–drift–kick). Default substep h = min(2 fs, 0.05/ω), with ω = √(e·max\|dE_z/dz\|/m_Γ) | 0.25 fs at 1e19, 0.65 fs at 1.5e18, 2 fs at 1.5e17. Error crossing the band bending ≤ 0.14 meV at 1e19; C21's 1 fs step gives ~2 meV, systematically positive. Second-order convergence is tested. |
 | Surface arrivals | `SurfaceArrivals.band_edge_at_surface` = E_C(0) − E_C(bulk) (= −E_bb) | Puts arrival kinetic energies on an absolute scale for the surface model. |
@@ -205,6 +205,43 @@ Validation (`validation/stage_d_band_bending.py`, `tests/test_stage_d.py`):
 * Flights stop and restart correctly at the region boundary.
 * **Equilibrium:** in a closed slab with reflecting walls, the density follows n(z) ∝ exp(−E_C(z)/kT)
   within ±4–8% statistics, and ⟨E⟩ = 1.552 kT against the exact nonparabolic Maxwellian (1.556 kT).
+
+## 6b. Depletion region: local mobile holes (`depletion_scattering`, `depletion_screening_cap`, `depletion_pop_screening`)
+
+User decision of 2026-10-06. The band-bending potential and the fixed ionized-acceptor charge are
+unchanged; only the mobile-hole population changes (`gaas_mc/depletion.py`).
+
+| Item | Choice |
+|---|---|
+| Fermi level | Global, fixed once from the bulk p and T with the hh + lh Fermi–Dirac gas (the same gas the e–h scattering uses). It differs from C21's single-band Eq. 58 by ≈ 2 meV at 1e19; the potential, which uses Eq. 58, is left exactly as before. |
+| Local holes | The valence bands shift with the same φ(z) = E_C(z) − E_C,bulk, so η(z) = η_bulk + φ/kT and p_b(z) = N_b F_{1/2}(η(z)). No local chemical potential is introduced. At the surface p/p_bulk ≈ 3e-12 (1e19) and 3e-11 (5e17). |
+| Electron–hole scattering | Uses the local gas everywhere: density, Fermi–Dirac occupation of the sampled hole, and Pauli blocking of the final state. |
+| BAP | Uses local p, local E_F^h (Eq. 44 with p(z)), and the C21 degeneracy criterion evaluated with the local E_F − E_V(z). The jump in τ_BAP where that criterion switches (Eqs. 50/51 ↔ 47) is C21's own discontinuity (ambiguity A11). |
+| Ionized impurities | N_A⁻ stays at the dopant density. The screening is recomputed from the local mobile carriers: β(z) = β_bulk·√(χ(z)/χ_bulk), with χ = ∂p/∂μ = Σ_b N_b F_{−1/2}(η)/kT. This equals the C21 bulk β (Eq. 28 or 29) at φ = 0 and becomes Debye-like ∝ √p when nondegenerate. |
+| Screening cap (**decision needed**) | As p → 0 the screening length, and with it the Brooks–Herring rate, diverge, and BH stops being meaningful once the screening length exceeds the ion spacing (Conwell–Weisskopf). The local length is therefore capped at L_cap = max(L_bulk, a). The default is a = acceptor Wigner–Seitz radius (3/4πN_A)^⅓: 2.9 nm at 1e19 (< L_bulk = 4.7 nm, **so at 1e19 the screening does not weaken at all**) and 7.8 nm at 5e17 (L_bulk 6.1 nm). Alternative: a = W_bb (9.9 nm / 42 nm), or any length. Both are run in the comparison. |
+| POP | C21 Eq. 25 is screened by the same hole β, so the local β is used by default (`depletion_pop_screening=True`). The phonon coupling itself is unchanged. |
+| Unchanged | Acoustic and intervalley parameters, band gap, and E_g(p) narrowing (bulk values), and the potential. Minority electrons (≈ n_i²/p) are neglected in screening. |
+| Numerics | φ grid from φ(0) to 0 with spacing ≤ kT/4 (109 points at 1e19). Each density-dependent mechanism holds one variant per grid point. Rates are interpolated linearly in φ, and the variant for an event is drawn with probability w·W₁/[(1−w)W₀ + w·W₁], which is exact for the interpolated rate. The null-collision bound covers every φ. Spin-relaxation tables are (φ, E). |
+
+Tests (`tests/test_depletion.py`):
+* the p(z) formula holds, and p is monotonic and equal to the bulk value at φ = 0;
+* the bulk grid row equals the bulk mechanisms, and the ions are never depleted;
+* the cap options behave as specified, and β follows the FD susceptibility;
+* BAP vanishes where holes are depleted;
+* the variant choice is unbiased;
+* a closed slab with local impurity screening keeps its Boltzmann density;
+* the compatibility option uses no local mechanisms.
+
+Profiles versus z: `validation/depletion.py profiles` → `depletion_profiles.png`.
+
+## 6c. Valley identity at the surface
+
+Surface arrivals keep `valley` (Γ/L/X), `eqv` (which of the 4 L or 3 X valleys), `k` (from that
+valley's minimum), and `K` (full crystal wavevector = valley center + k). The lab axes are taken as the
+cubic axes, with z = [001] the surface normal. The equivalent valley is chosen on each intervalley
+transfer consistently with the multiplicities: uniformly among the destination type's valleys, or
+among the *other* valleys for L→L and X→X (`gaas_mc/valleys.py`). L arrivals are **not** mapped onto
+a scalar-mass Γ model; the surface stage will be valley-aware.
 
 ## 6. Other
 

@@ -86,7 +86,51 @@ class ElectronHole(Mechanism):
 
     # ------------------------------------------------------------------------------------------
     def _solve_s(self, c, K, ghat, E_tot, s_guess):
-        """Vectorized bisection for F(s) = E_e(|c - s ghat/2|) + hbar^2 |K - c + s ghat/2|^2/(2 m_h) - E_tot."""
+        """Root s >= 0 of F(s) = E_e(|c - s ghat/2|) + hbar^2 |K - c + s ghat/2|^2/(2 m_h) - E_tot.
+        Newton iteration from s = g (the exact root for a parabolic band) with analytic dF/ds;
+        any row that does not converge falls back to vectorized bisection."""
+        m, a, mh = self.m, self.alpha, self.mh
+
+        def F(s):
+            ke = c - 0.5 * s[:, None] * ghat
+            kh = K - ke
+            return (bands.E_of_k(np.linalg.norm(ke, axis=1), m, a)
+                    + HBAR**2 * np.sum(kh * kh, axis=1) / (2 * mh) - E_tot)
+
+        n = c.shape[0]
+        lo = np.zeros(n)
+        f_lo = F(lo)
+        ok = f_lo < 0
+        # --- Newton
+        s = s_guess.astype(float).copy()
+        done = np.zeros(n, bool)
+        tol = 1e-13 * np.abs(E_tot)
+        for _ in range(12):
+            ke = c - 0.5 * s[:, None] * ghat
+            kh = K - ke
+            kn = np.linalg.norm(ke, axis=1)
+            Ee = bands.E_of_k(kn, m, a)
+            f = Ee + HBAR**2 * np.sum(kh * kh, axis=1) / (2 * mh) - E_tot
+            dEdk = HBAR**2 * kn / (m * (1 + 2 * a * Ee))
+            with np.errstate(invalid="ignore", divide="ignore"):
+                dk = -np.sum(ke * ghat, axis=1) / (2 * np.where(kn > 0, kn, 1.0))
+            df = dEdk * dk + HBAR**2 * np.sum(kh * ghat, axis=1) / (2 * mh)
+            done = np.abs(f) <= tol
+            if np.all(done | ~ok):
+                break
+            with np.errstate(invalid="ignore", divide="ignore"):
+                step = np.where(done, 0.0, f / df)
+            s = s - np.where(np.isfinite(step), step, 0.0)
+        good = ok & done & (s >= 0)
+        if np.all(good | ~ok):
+            return s, ok
+        # --- bisection fallback for the remaining rows
+        rest = np.flatnonzero(ok & ~good)
+        s_b, _ = self._bisect(c[rest], K[rest], ghat[rest], E_tot[rest], s_guess[rest])
+        s[rest] = s_b
+        return s, ok
+
+    def _bisect(self, c, K, ghat, E_tot, s_guess):
         m, a, mh = self.m, self.alpha, self.mh
 
         def F(s):

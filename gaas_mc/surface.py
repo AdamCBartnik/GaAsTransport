@@ -4,6 +4,11 @@ When an electron coming from z > 0 reaches z = 0, its bulk trajectory stops and 
 state is stored here. No emission physics is applied: electron affinity, mass discontinuity,
 image charge, and transmission belong to a separate surface model that consumes these records.
 
+Valley identity is preserved: ``valley`` (0 Gamma, 1 L, 2 X), ``eqv`` (which of the 4 L or 3 X
+valleys), ``k`` (wavevector measured from that valley's minimum), and ``K`` (full crystal wavevector
+= valley center + k; lab z = [001], the surface normal). No valley is mapped onto a scalar-mass Gamma
+model here; that belongs to the valley-aware surface stage.
+
 Energies are kinetic energies above the local conduction-band minimum of the electron's
 valley at z = 0. ``band_edge_at_surface`` = E_C(0) - E_C(bulk) (negative with downward band bending)
 places them on an absolute scale: E_total - E_C(bulk) = E + band_edge_at_surface + valley offset. Spin s = +1/-1 along +z, the light propagation direction (into the material),
@@ -34,6 +39,8 @@ class SurfaceArrivals:
     pid: np.ndarray
     time_in_valley: np.ndarray = None   # (n, 3) time spent in Gamma, L, X before arrival [s]
     visited: np.ndarray = None          # (n, 3) bool: valley ever occupied
+    eqv: np.ndarray = None              # int8: which equivalent valley (see gaas_mc/valleys.py)
+    K: np.ndarray = None                # (n, 3) full crystal wavevector = valley center + k [1/m]
     band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
     mechanism_names: tuple = ()
 
@@ -75,6 +82,7 @@ class SurfaceArrivals:
                    band=np.zeros(0, np.int8), n_flips=np.zeros(0, np.int32),
                    n_events=np.zeros((0, n_mech), np.int32), pid=np.zeros(0, int),
                    time_in_valley=np.zeros((0, 3)), visited=np.zeros((0, 3), bool),
+                   eqv=np.zeros(0, np.int8), K=np.zeros((0, 3)),
                    mechanism_names=tuple(names))
 
     @classmethod

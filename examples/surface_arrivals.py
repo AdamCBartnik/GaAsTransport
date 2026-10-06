@@ -37,12 +37,12 @@ flat = len(sys.argv) > 4 and sys.argv[4] == "flat"
 
 assumptions = ModelAssumptions()                       # all defaults, see docs/MODEL_ASSUMPTIONS.md
 sample = Sample(gaas_chubenko2021(), per_cm3(p))
-mech = build_mechanisms(sample, assumptions, "C")
+field = NoField() if flat else C21BandBending(sample)
+mech = build_mechanisms(sample, assumptions, "C", field=field)      # local depletion-region rates
 spin = SpinModel(sample, [m for m in mech if m.valley_from == 0])
 rng = np.random.default_rng(12345)
 
 ens = photoexcite(sample, ev(hv), n, rng, assumptions=assumptions)
-field = NoField() if flat else C21BandBending(sample)
 sim = Simulation(sample, mech, spin, field=field, t_max=370 * PS, assumptions=assumptions)   # C21 Sec. IV
 t0 = time.time()
 res = sim.run(ens, rng)
