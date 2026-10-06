@@ -10,7 +10,8 @@ surface model (Stage E) is available as an optional, replaceable module for benc
 
 * `docs/IMPLEMENTATION_PLAN.md`: plan, parameter table, mechanism table, original list of ambiguities
 * `docs/MODEL_ASSUMPTIONS.md`: **every modelling choice, its default, alternatives, and validation evidence**
-* `docs/VALIDATION.md`: comparison with C21 figures (rates, Fig. 6, Fig. 9 drift velocity, Fig. 14 spin relaxation time)
+* `docs/VALIDATION.md`: comparison with C21 figures (rates, Fig. 6, Fig. 9 drift velocity, Fig. 14 spin relaxation time, Fig. 18 QE/ESP)
+* `docs/PERFORMANCE.md`: the two engines (NumPy reference, compiled fast engine for CPU threads / CUDA), measured speeds, parallel and cluster runs
 * `refs/README.md`: references (PDFs are kept locally, not committed)
 * Units: SI internally. Use `constants.ev()` and `constants.per_cm3()` at the boundary.
 * Every formula cites its C21 equation number in the docstrings.
@@ -48,6 +49,15 @@ PYTHONPATH=. python examples/surface_arrivals.py [N] [p_cm3] [hv_eV]
 ```
 
 Outputs go to `validation/out/` and `examples/out/`; both are gitignored.
+
+Fast engine and parallel runs (`docs/PERFORMANCE.md`):
+
+```python
+from gaas_mc.fast import FastSimulation
+res = FastSimulation(sim, "cuda").run(ensemble, rng)    # or "cpu" (Numba threads); same Result as sim.run
+from gaas_mc.parallel import run_parallel                # chunked, max_workers, worker-count independent
+```
+Optional dependencies: `numba` (fast CPU engine), `numba-cuda` + CUDA 12 runtime (GPU), `cupy` (CuPy array backend).
 
 ## Minimal use
 

@@ -158,3 +158,53 @@ statistics (σ ≈ 1.5% for fractions, σ(ESP) ≈ 0.04 for ~700 arrivals at 1e1
   the 5e17 transit has 5× more impurity events, a slightly broader angular distribution, and *less* spin
   loss (0.984 vs 0.972 ESP). More momentum scattering suppresses D'yakonov–Perel relaxation (motional
   narrowing).
+
+## Stage E: C21 Fig. 18 end to end (`validation/stage_e_fig18.py`)
+
+p = 1e19 cm⁻³, hν = 1.45–2.20 eV in 0.05 eV steps (C21's grid), χ = 0.64, 0.67, 0.70, 0.73 eV,
+370 ps, 10⁵ electrons per photon energy (as in C21), Adachi absorption (as C21 Fig. 3), fast GPU
+engine. Every χ and surface variant continues the same first-arrival ensemble. C21 curves:
+`validation/reference/c21_fig18.csv`, read exactly from the vector graphics of the PDF
+(`tools/extract_c21_fig18.py`). Full tables and plots: `validation/out/stageE/fig18_summary_*.txt`,
+`fig18_qe_esp_*.png`, `fig18_details_*.png`. The numbers below are from runs after the surface-crossing
+integrator fix (`docs/MODEL_ASSUMPTIONS.md` 6d); compared with runs before it, the QE ratios changed by
+≤ 0.002 and the ESP offsets by ≤ 0.1 % abs. (emission per unit time is insensitive to the k_z drift
+because T ∝ k_z and the return rate ∝ 1/k_z).
+
+**Engines agree over the full 370 ps** (`validation/stage_e_engines.py`): reference-engine first
+arrivals (6000–8000 electrons per hν) vs the GPU engine (10⁵): arrival fraction, arrival-time
+median and 90th percentile, valley fractions, ESP and energy at arrival; 48 z-scores, rms 0.93,
+max 2.7.
+
+**QE and ESP vs C21** (mean over the 16 photon energies; σ(QE) ≈ 0.05–0.1 % abs., σ(ESP) ≈ 1 % abs.):
+
+| depletion scattering | matching mass | QE ours/C21 (χ = 0.64 / 0.67 / 0.70 / 0.73) | ESP ours − C21, abs. % |
+|---|---|---|---|
+| bulk (C21) | band edge m* | 0.97 / 0.99 / 1.02 / 1.07 | −0.2 / −0.1 / −1.8 / −3.5 |
+| bulk (C21) | velocity m*(1+2αE) | 1.25 / 1.32 / 1.40 / 1.50 | −0.4 / −1.0 / −1.6 / −4.4 |
+| local | band edge m* | 1.36 / 1.39 / 1.42 / 1.46 | +0.5 / +0.1 / −0.6 / −2.7 |
+| local | velocity | 1.65 / 1.74 / 1.84 / 1.93 | +0.3 / −0.2 / −1.3 / −3.4 |
+
+* With bulk rates in the depletion region (as C21 state) and the band-edge mass in the transfer
+  matrix (C21's sentence read literally), the QE curves are reproduced to a few % at all χ and hν
+  without any adjustment (rms 0.2–0.5 % abs.). The largest relative deviation is the near-edge
+  point 1.45 eV (+15 % at χ = 0.67), where the absorption data differ (C21: Adachi fit to Zollner;
+  here Adachi 1989).
+* ESP follows C21's shape (maximum ≈ 26 % at 1.55–1.65 eV, drop when the split-off band is excited at
+  1.7–1.75 eV, ≈ 5–8 % at 2.2 eV) and agrees for χ ≤ 0.70. At χ = 0.73 ours is 3–8 % lower than C21's
+  around 1.5–1.9 eV: C21's ESP rises with χ more strongly than ours. Not resolved.
+* Surface valleys (bulk, band-edge mass, χ = 0.67): first arrivals Γ/L/X = 78/12/10 % (1.45 eV) to
+  66/19/15 % (2.2 eV); emitted electrons come from Γ (77–91 %) and X[001] (9–23 %); L never emits.
+  Encounters (median, 90th percentile): 2 (5) before emission, 4–5 (10–13) before trapping.
+  MTE 12–30 meV, mean vacuum kinetic energy 94–162 meV.
+* **local vs bulk** (same photoexcited ensembles, band-edge mass, χ = 0.67): first arrivals are
+  unchanged, but QE rises by +1.6 % abs. (1.45 eV) to +5.3 % (2.2 eV), i.e. +34–46 % relative; ESP is
+  unchanged within errors; X-valley emission roughly doubles (9 → 17 % at 1.45 eV, 23 → 33 % at
+  2.2 eV); trapped electrons make twice as many encounters (median 8–10); MTE +4–8 meV. Reflected
+  electrons re-enter the depletion region; with bulk hole densities there they lose energy to e–h
+  scattering and fall below the vacuum level within a few encounters, with depleted holes they keep
+  it and try again. The depletion treatment therefore matters for QE far more than the first-arrival
+  diagnostics of Stage D′ suggested.
+* **Response time / near-edge** (bulk, band-edge mass, χ = 0.67): only 21 % (1.45 eV) to 32 %
+  (1.70 eV) of the QE is emitted within 10 ps; those early electrons have ESP 38–49 % against 21–26 %
+  for all electrons emitted up to 370 ps.

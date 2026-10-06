@@ -6,7 +6,11 @@ for chi = 0.64, 0.67, 0.70, 0.73 eV, end to end (photoexcitation -> transport ->
            surface step for every surface variant
   surface  python validation/stage_e_fig18.py surface <bulk|local> <vmass|bmass|all> [workers=14]
            only the surface step, from the saved first arrivals
-  report   python validation/stage_e_fig18.py report <bulk|local>/<vmass|bmass> ...
+  fast     python validation/stage_e_fig18.py fast <bulk|local> [N_per_hv=100000] [cuda|cpu]
+           the same two steps with the fast engine (gaas_mc/fast, docs/PERFORMANCE.md), one chunk of
+           N electrons per photon energy, all chi and surface variants in one launch; results go to
+           <variant>_fast/ (report tag e.g. bulk_fast/vmass)
+  report   python validation/stage_e_fig18.py report <bulk|local|bulk_fast|local_fast>/<vmass|bmass> ...
 
 Model (C21-compatible baseline, "bulk"):
   * Stage C bulk mechanisms + C21 band bending (Eqs. 56-62), depletion_scattering = "bulk" (the
@@ -93,6 +97,7 @@ class BranchedSurface:
 
 
 def _setup(variant):
+    variant = variant.replace("_fast", "")
     a = ModelAssumptions(depletion_scattering=variant, absorption_model="adachi1989")
     s = Sample(MAT, per_cm3(P))
     field = C21BandBending(s)
@@ -147,7 +152,12 @@ def surface_job(args):
                                          for sv, chi in branches])
     r = sim.run(Ensemble.concatenate(parts), np.random.default_rng([int(round(hv * 1000)), chunk, 7]),
                 start_at_surface=True)
-    em, fin = r.emissions, r.ensemble
+    _save_surface(variant, svars, hv, chunk, gen, arr, r.emissions, r.ensemble, branches, outs)
+    return f"hv{hv:.2f}_c{chunk:02d} ({'+'.join(svars)})", time.time() - t0
+
+
+def _save_surface(variant, svars, hv, chunk, gen, arr, em, fin, branches, outs):
+    """Split a batched surface run (branch b = pid // PID_STRIDE) into one file per surface variant."""
     eb, fb = em.pid // PID_STRIDE, fin.pid // PID_STRIDE
     for sv in svars:
         rec = dict(n=int(gen["n"]), hv=hv, z0_all=gen["z0_all"], spin0_all=gen["spin0_all"],
@@ -165,7 +175,47 @@ def surface_job(args):
                         tag + "fin_n_surface": fin.n_surface[j], tag + "fin_t": fin.t[j]})
         outs[sv].parent.mkdir(parents=True, exist_ok=True)
         np.savez_compressed(outs[sv], **rec)
-    return f"hv{hv:.2f}_c{chunk:02d} ({'+'.join(svars)})", time.time() - t0
+
+
+def fast_run(variant, n_per_hv=100_000, device="cuda"):
+    """Both steps with the fast engine: transport to the first arrival (absorbing surface), then all
+    (surface variant, chi) branches from that common first-arrival ensemble in one launch."""
+    from gaas_mc.fast import FastSimulation
+    tag = f"{variant}_fast"
+    a, s, sim = _setup(variant)
+    transport = FastSimulation(sim, device)
+    branches = [(sv, chi) for sv in SURFACE_VARIANTS for chi in CHIS]
+    models = [C21Surface(chi=ev(chi), material=MAT, **SURFACE_VARIANTS[sv]) for sv, chi in branches]
+    sim_s = Simulation(s, sim.mechanisms, sim.spin_model, field=sim.field, surface=models[0],
+                       t_max=T_MAX, assumptions=a)
+    surface = FastSimulation(sim_s, device, surface_models=models)
+    for hv in HVS:
+        hv = float(hv)
+        stem = _stem(tag, hv, 0)
+        t0 = time.time()
+        if not Path(f"{stem}_arr.npz").exists():
+            rng = np.random.default_rng([int(round(hv * 1000)), 0, 99])
+            ens = photoexcite(s, ev(hv), n_per_hv, rng, assumptions=a)
+            arr = transport.run(ens, rng).arrivals
+            stem.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(f"{stem}_gen.npz", n=n_per_hv, hv=hv, z0_all=ens.z0, spin0_all=ens.spin0)
+            arr.save_npz(f"{stem}_arr.npz")
+        t1 = time.time()
+        outs = {sv: OUT / tag / f"surf_{sv}" / f"hv{hv:.2f}_c00.npz" for sv in SURFACE_VARIANTS}
+        if all(o.exists() for o in outs.values()):
+            continue
+        gen = dict(np.load(f"{stem}_gen.npz"))
+        arr = SurfaceArrivals.load_npz(f"{stem}_arr.npz")
+        parts = []
+        for b in range(len(branches)):
+            e = Ensemble.from_arrivals(arr)
+            e.pid = e.pid + b * PID_STRIDE
+            parts.append(e)
+        r = surface.run(Ensemble.concatenate(parts), np.random.default_rng([int(round(hv * 1000)), 0, 7]),
+                        start_at_surface=True, surface_branch=np.repeat(np.arange(len(branches)), len(arr)))
+        _save_surface(tag, list(SURFACE_VARIANTS), hv, 0, gen, arr, r.emissions, r.ensemble, branches, outs)
+        print(f"{tag} hv={hv:.2f}: N={int(gen['n'])} arrivals {len(arr)}  transport {t1 - t0:.0f} s, "
+              f"surface ({len(branches)} branches) {time.time() - t1:.0f} s", flush=True)
 
 
 def _pool(fn, jobs, workers, label):
@@ -253,8 +303,12 @@ def summarize(tag):
                             emit_valley=np.bincount(cat(parts, tg + "valley"), minlength=3),
                             n_trap=int(np.sum(st == TRAPPED)), n_timeout=int(np.sum(st == TIMEOUT)),
                             trap_valley=np.bincount(fv[st == TRAPPED], minlength=3),
-                            enc_emit=float(nfin[st == EMITTED].mean()) if ne else np.nan,
-                            enc_trap=float(nfin[st == TRAPPED].mean()) if np.any(st == TRAPPED) else np.nan,
+                            enc_emit=float(np.median(nfin[st == EMITTED])) if ne else np.nan,
+                            enc_trap=float(np.median(nfin[st == TRAPPED])) if np.any(st == TRAPPED) else np.nan,
+                            enc_emit_p90=float(np.percentile(nfin[st == EMITTED], 90)) if ne else np.nan,
+                            enc_trap_p90=(float(np.percentile(nfin[st == TRAPPED], 90))
+                                          if np.any(st == TRAPPED) else np.nan),
+                            enc_emit_mean=float(nfin[st == EMITTED].astype(float).mean()) if ne else np.nan,
                             enc_all=float(nfin[(st == EMITTED) | (st == TRAPPED)].mean()),
                             E_vac=to_ev(cat(parts, tg + "E_vac")), E_perp=E_perp,
                             MTE=float(E_perp.mean()) if ne else np.nan,
@@ -272,7 +326,7 @@ def report(tags=("bulk/vmass",)):
         lines.append(f"===== {v} (depletion scattering / surface matching mass)  p = 1e19 cm^-3, 370 ps, "
                      f"Adachi absorption; C21 = Fig. 18 curves")
         lines.append("  hv  chi    N   QE%(+-)      C21   QE%cas  ESP%(+-)      C21  ESP%cas | arrive  G/L/X %   "
-                     "| emitted G/L/X %   | trapped | enc emit/trap | MTE meV <E_vac> meV")
+                     "| emitted G/L/X %   | trapped | encounters median(p90) emit / trap | MTE meV <E_vac> meV")
         for r in res:
             qe_c = np.interp(r["hv"], *ref[("C21_simulation", "QE", r["chi"])].T)
             esp_c = np.interp(r["hv"], *ref[("C21_simulation", "ESP", r["chi"])].T)
@@ -283,7 +337,8 @@ def report(tags=("bulk/vmass",)):
                 f"  {100 * r['QE_casey']:6.2f}  {100 * r['ESP']:5.1f}({100 * r['dESP']:.1f}) {esp_c:6.1f}"
                 f"  {100 * r['ESP_casey']:6.1f} | {r['n_arr']:6d} {av[0]:4.1f}/{av[1]:4.1f}/{av[2]:4.1f} "
                 f"| {r['n_emit']:5d} {ev_[0]:5.1f}/{ev_[1]:3.1f}/{ev_[2]:4.1f} | {r['n_trap']:6d} "
-                f"| {r['enc_emit']:5.2f}/{r['enc_trap']:5.2f} | {1e3 * r['MTE']:6.1f} {1e3 * np.mean(r['E_vac']):7.1f}")
+                f"| {r['enc_emit']:3.0f}({r['enc_emit_p90']:3.0f}) / {r['enc_trap']:3.0f}({r['enc_trap_p90']:3.0f}) "
+                f"| {1e3 * r['MTE']:6.1f} {1e3 * np.mean(r['E_vac']):7.1f}")
         lines.append("")
         lines.append("  emission-time cutoff (same run): QE% / ESP% for t_emit <= " +
                      ", ".join(f"{tc / PS:.0f}" for tc in T_CUTS) + " ps")
@@ -301,7 +356,7 @@ def report(tags=("bulk/vmass",)):
                 lines.append(f"  {q:3s} chi={chi:.2f}: ours - C21 mean {d.mean():+.2f} %, rms {np.sqrt(np.mean(d**2)):.2f} %, "
                              f"mean |d|/sigma {np.mean(np.abs(d) / err):.2f}, ratio ours/C21 mean {np.mean(ours / theirs):.3f}")
         lines.append("")
-    pairs = [(b, b.replace("bulk/", "local/")) for b in tabs if b.startswith("bulk/")]
+    pairs = [(b, "local" + b[len("bulk"):]) for b in tabs if b.startswith("bulk")]
     pairs += [(b, b.replace("/vmass", "/bmass")) for b in tabs if b.endswith("/vmass")]
     for b0, b1 in pairs:
         if b1 not in tabs:
@@ -366,8 +421,8 @@ def report(tags=("bulk/vmass",)):
             ax.plot([r["hv"] for r in rr], [r["enc_emit"] for r in rr], "-o", ms=3, lw=2, color=cols[chi],
                     label=f"emitted, chi = {chi:.2f}")
             ax.plot([r["hv"] for r in rr], [r["enc_trap"] for r in rr], ":", lw=1.5, color=cols[chi])
-        ax.set_xlabel("photon energy, eV"); ax.set_ylabel("mean surface encounters")
-        ax.set_title("Encounters before emission (solid) / trapping (dotted)", fontsize=10)
+        ax.set_xlabel("photon energy, eV"); ax.set_ylabel("median surface encounters")
+        ax.set_title("Encounters before emission (solid) / trapping (dotted), median", fontsize=10)
         ax.legend(fontsize=8, frameon=False)
         for ax, key, lab in ((axs[1, 0], "E_vac", "kinetic energy in vacuum above E_vac, eV"),
                              (axs[1, 1], "E_perp", "transverse energy in vacuum, eV")):
@@ -400,6 +455,9 @@ if __name__ == "__main__":
     if cmd == "run":
         run(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 16000,
             int(sys.argv[4]) if len(sys.argv) > 4 else 14)
+    elif cmd == "fast":
+        fast_run(sys.argv[2], int(sys.argv[3]) if len(sys.argv) > 3 else 100_000,
+                 sys.argv[4] if len(sys.argv) > 4 else "cuda")
     elif cmd == "surface":
         surface(sys.argv[2], sys.argv[3], int(sys.argv[4]) if len(sys.argv) > 4 else 14)
     elif cmd == "report":

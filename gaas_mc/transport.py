@@ -45,6 +45,13 @@ dt_max_field: velocity-Verlet substep in the field region. Default (None): h = m
               omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
               C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
               < 0.15 meV, versus ~2 meV for the 1 fs step used in C21 (second order, tested).
+surface_bounce_aggregation (default True; surface models that report T in their info dict):
+              an electron reflected at z = 0 while the field pushes it back returns after
+              t_ret = 2 hbar k_z / |F(0)|. Each return repeats the same state, hence the same
+              transmission trial; with one flight time dt (memoryless) the floor(dt / t_ret) returns
+              are booked at once, with a geometric number of failed trials before an emission. Exact
+              in distribution; prevents the stall of grazing electrons (k_z -> 0 needs ~1/(Gamma0
+              t_ret) returns). False: one return per loop iteration (brute force, for tests).
 
 Backend (gaas_mc/backend.py): backend="numpy" (default) or "cupy" (GPU). The loop below is the same
 code for both; with "cupy" the ensemble, the tables and the random numbers live on the device, and
@@ -105,7 +112,8 @@ class Simulation:
     def __init__(self, sample, mechanisms, spin_model=None, field=None, t_max=370 * PS,
                  surface="absorb", z_back=None, E_table_max=2.0 * EV, n_table=4001,
                  dt_max_field=None, snapshot_times=(), log_events=False, gamma0_margin=1.02,
-                 assumptions=DEFAULT, back="absorb", backend="numpy"):
+                 assumptions=DEFAULT, back="absorb", backend="numpy", surface_bounce_aggregation=True):
+        self.surface_bounce_aggregation = surface_bounce_aggregation
         self.backend = backend
         self.xp = get_xp(backend)
         self.sample = sample
@@ -338,6 +346,43 @@ class Simulation:
         k[:, 2] += 0.5 * F * h / HBAR
         return z, k
 
+    def _surface_crossing_time(self, z_old, k_old, m, a, h, h_lin):
+        """Time to reach z = 0 within a substep that crosses the surface. Linear interpolation in z
+        is badly biased for short arcs near the surface (an electron near the top of an arc of
+        duration << h): it underestimates the crossing time, hence |k_z| at the surface, and
+        repeated returns drift k_z -> 0. Here the motion over the substep is z(t) = z_old + v t +
+        a_z t^2 / 2 with the force at z_old and the velocity mass m(1 + 2 alpha E); the smallest
+        root in [0, h] is used (linear interpolation if there is none)."""
+        E0 = bands.E_of_k(np.linalg.norm(k_old, axis=1), m, a)
+        mv = m * (1 + 2 * a * E0)
+        v = HBAR * k_old[:, 2] / mv
+        acc = -Q_E * self._Ez_ext(z_old) / mv
+        A2, B, Cc = 0.5 * acc, v, z_old
+        with np.errstate(invalid="ignore", divide="ignore"):
+            D = B * B - 4 * A2 * Cc
+            sq = np.sqrt(np.where(D >= 0, D, 0.0))
+            q = -0.5 * (B + np.where(B >= 0, sq, -sq))
+            t1 = np.where(A2 != 0, q / A2, np.inf)
+            t2 = np.where(q != 0, Cc / q, np.inf)
+            t1 = np.where((t1 >= 0) & (t1 <= h * (1 + 1e-9)), t1, np.inf)
+            t2 = np.where((t2 >= 0) & (t2 <= h * (1 + 1e-9)), t2, np.inf)
+            t = np.minimum(t1, t2)
+            ok = (D >= 0) & np.isfinite(t)
+        return np.where(ok, np.minimum(t, h), h_lin)
+
+    def _surface_crossing_k(self, z_old, k_old, kc, m, a, sel):
+        """k at the surface crossing (rows sel): k_par unchanged, |k_z| from total-energy
+        conservation E(z_old) + E_C(z_old) = E(0) + E_C(0) (exact, independent of the step), k_z < 0.
+        Keeps the integrator's value where energy conservation has no solution."""
+        E0 = bands.E_of_k(np.linalg.norm(k_old, axis=1), m, a)
+        Es = E0 + self.field.band_edge(np.maximum(z_old, 0.0)) - self.field.band_edge(0.0 * z_old)
+        kt2 = bands.k_of_E(np.maximum(Es, 0.0), m, a) ** 2
+        kz2 = kt2 - k_old[:, 0] ** 2 - k_old[:, 1] ** 2
+        use = sel & (kz2 > 0)
+        kc = kc.copy()
+        kc[use, 2] = -np.sqrt(kz2[use])
+        return kc
+
     def _propagate_field(self, z, k, E, m, a, dt):
         """Velocity-Verlet substeps (<= dt_max) inside the field region. A substep that crosses a
         boundary (surface, back contact, or field-region boundary z_max) is redone with the
@@ -389,7 +434,12 @@ class Simulation:
                 zb = np.where(cross_s, 0.0, np.where(cross_b, self.z_back or 0.0, zr or 0.0))
                 f = np.clip((z_old - zb) / (z_old - z_new), 0.0, 1.0)
                 hc = h * f
+                if np.any(cross_s):
+                    hc = np.where(cross_s, self._surface_crossing_time(z_old, k_old, m[ia], a[ia], h, hc), hc)
                 _, kc = self._kdk(z_old[cr].copy(), k_old[cr].copy(), m[ia][cr], a[ia][cr], hc[cr])
+                if np.any(cross_s):
+                    kc = self._surface_crossing_k(z_old[cr], k_old[cr], kc, m[ia][cr], a[ia][cr],
+                                                  cross_s[cr])
                 z_new[cr] = zb[cr]
                 k_new[cr] = kc
                 h = np.where(cr, hc, h)
@@ -427,6 +477,7 @@ class Simulation:
         n_self = 0
         arrivals = []
         emissions = []
+        last_T = xp.full(N, -1.0)            # transmission of the encounter that just reflected i
         log = {"mech": [], "E_before": [], "E_after": [], "valley_before": [], "valley_after": []}
 
         snaps = None
@@ -444,7 +495,7 @@ class Simulation:
             ih = xp.flatnonzero((ens.status == ALIVE) & (ens.z <= 0) & (ens.k[:, 2] < 0))
             arrivals.append(self._arrival_record(ens, ih, n_events))
             ens.n_surface[ih] += 1
-            self._surface_interaction(ens, ih, rng, emissions)
+            self._surface_interaction(ens, ih, rng, emissions, last_T)
 
         it = 0
         idx = xp.flatnonzero(ens.status == ALIVE)
@@ -465,6 +516,17 @@ class Simulation:
             t0 = ens.t[idx]
             dt = np.minimum(tau, self.t_max - t0)
             timeout = tau >= self.t_max - t0
+            if self.surface_model is not None:
+                lt = last_T[idx]
+                last_T[idx] = -1.0                       # valid for this flight only
+                if self.surface_bounce_aggregation and not self.spin_flip_at_arrival:
+                    keep, dt = self._bounce_trains(ens, idx, v, inside, lt, dt, rng, emissions)
+                    if not bool(np.all(keep)):
+                        idx, v, inside, G, dt, timeout = (x[keep] for x in (idx, v, inside, G, dt, timeout))
+                        if idx.size == 0:
+                            idx = xp.flatnonzero(ens.status == ALIVE)
+                            continue
+                    t0 = ens.t[idx]
             state0 = (ens.z[idx].copy(), ens.k[idx].copy(), ens.E[idx].copy())
 
             z1, k1, E1, dt_used, event = self.propagate(ens.z[idx], ens.k[idx], ens.E[idx], v, dt)
@@ -492,7 +554,7 @@ class Simulation:
                 if self.surface_model is None:
                     ens.status[ih] = SURFACE
                 else:
-                    self._surface_interaction(ens, ih, rng, emissions)
+                    self._surface_interaction(ens, ih, rng, emissions, last_T)
             ens.status[idx[event == EV_BACK]] = BACK
             # EV_REGION / EV_WALL: the flight stopped at the field boundary or reflected off the back
             # wall; there is no scattering event, and the next flight follows
@@ -519,27 +581,81 @@ class Simulation:
                       n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej,
                       flight_mode=self.flight_mode, event_log=log, emissions=em)
 
-    def _surface_interaction(self, ens, ih, rng, emissions):
+    def _surface_interaction(self, ens, ih, rng, emissions, last_T=None):
         """Ask the surface model what happens to electrons ih at z = 0: emitted, trapped, or reflected
-        back into the semiconductor (specularly, k_z -> -k_z)."""
+        back into the semiconductor (specularly, k_z -> -k_z). For reflected electrons the trial's
+        transmission (info["T"], if the model reports it) is kept in last_T for _bounce_trains."""
         from .surface_c21 import EMIT, REFLECT, TRAP
         K = ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat)
         outcome, info = self.surface_model.interact(ens.k[ih], ens.E[ih], ens.valley[ih], K, rng,
                                                     pid=ens.pid[ih])
         em = outcome == EMIT
         if np.any(em):
-            ie = ih[em]
-            emissions.append(Emissions(
-                t=ens.t[ie].copy(), E=ens.E[ie].copy(), k=ens.k[ie].copy(), K=K[em].copy(),
-                valley=ens.valley[ie].copy(), eqv=ens.eqv[ie].copy(), spin=ens.spin[ie].copy(),
-                spin0=ens.spin0[ie].copy(), z0=ens.z0[ie].copy(), E0=ens.E0[ie].copy(),
-                band=ens.band[ie].copy(), n_surface=ens.n_surface[ie].copy(), pid=ens.pid[ie].copy(),
-                p_vac=info["p_vac"][em].copy(), E_vac=info["E_vac_kin"][em].copy()))
-            ens.status[ie] = EMITTED
+            self._record_emission(ens, ih[em], K[em], info["p_vac"][em], info["E_vac_kin"][em], emissions)
         ens.status[ih[outcome == TRAP]] = TRAPPED
-        rf = ih[outcome == REFLECT]
+        refl = outcome == REFLECT
+        rf = ih[refl]
         ens.k[rf, 2] = np.abs(ens.k[rf, 2])           # back into the semiconductor (+z)
         ens.z[rf] = 0.0
+        if last_T is not None and "T" in info:
+            last_T[rf] = info["T"][refl]
+
+    def _record_emission(self, ens, ie, K, p_vac, E_vac, emissions):
+        emissions.append(Emissions(
+            t=ens.t[ie].copy(), E=ens.E[ie].copy(), k=ens.k[ie].copy(), K=K.copy(),
+            valley=ens.valley[ie].copy(), eqv=ens.eqv[ie].copy(), spin=ens.spin[ie].copy(),
+            spin0=ens.spin0[ie].copy(), z0=ens.z0[ie].copy(), E0=ens.E0[ie].copy(),
+            band=ens.band[ie].copy(), n_surface=ens.n_surface[ie].copy(), pid=ens.pid[ie].copy(),
+            p_vac=p_vac.copy(), E_vac=E_vac.copy()))
+        ens.status[ie] = EMITTED
+
+    def _bounce_trains(self, ens, idx, v, inside, lt, dt, rng, emissions):
+        """Exact aggregation of repeated surface returns (see surface_bounce_aggregation in the module
+        docstring). Electrons idx just reflected by the surface model (lt >= 0: that trial's T), at
+        z = 0 moving inward in the field region, with t_ret <= min(dt, dt_max): the floor(dt / t_ret)
+        returns of this flight are booked at once. Returns (keep, dt): keep is False for electrons
+        emitted in the train; dt is the remaining flight time (< t_ret) of the others."""
+        xp = self.xp
+        keep = xp.ones(idx.size, bool)
+        cand = inside & (lt >= 0) & (ens.z[idx] <= 0) & (ens.k[idx, 2] > 0)
+        if not bool(np.any(cand)):
+            return keep, dt
+        F0 = -Q_E * float(self.field.Ez(np.array([0.0]))[0])
+        if not F0 < 0:
+            return keep, dt
+        kz = ens.k[idx, 2]
+        t_ret = 2 * HBAR * kz / (-F0)
+        tr = cand & (t_ret <= np.minimum(dt, self.dt_max))
+        if not bool(np.any(tr)):
+            return keep, dt
+        pos = xp.flatnonzero(tr)
+        it = idx[pos]
+        T = lt[pos]
+        trt = t_ret[pos]
+        n_b = np.floor(dt[pos] / trt)
+        u = rng.random(it.size)
+        with np.errstate(divide="ignore", invalid="ignore"):
+            k_fail = np.where(T >= 1, 0.0, np.where(T > 0, np.floor(np.log1p(-u) / np.log1p(-T)), np.inf))
+        em = k_fail < n_b
+        nb_done = np.where(em, k_fail + 1, n_b)
+        elapsed = nb_done * trt
+        ens.t[it] += elapsed
+        ens.dt_spin[it] += elapsed
+        add_at(ens.time_in_valley, (it, v[pos]), elapsed)
+        # saturating int32 encounter counter (a grazing train can add ~1e9 returns)
+        ens.n_surface[it] = np.minimum(ens.n_surface[it] + nb_done, 2**31 - 1).astype(np.int32)
+        if bool(np.any(em)):
+            ie = it[em]
+            ens.k[ie, 2] = -ens.k[ie, 2]                 # incident (outward) at the emitting return
+            ens.z[ie] = 0.0
+            K = ens.k[ie] + valley_center(ens.valley[ie], ens.eqv[ie], self.material.a_lat)
+            _, info = self.surface_model.interact(ens.k[ie], ens.E[ie], ens.valley[ie], K, rng,
+                                                  pid=ens.pid[ie])       # vacuum state only
+            self._record_emission(ens, ie, K, info["p_vac"], info["E_vac_kin"], emissions)
+            keep[pos[em]] = False
+        dt = dt.copy()
+        dt[pos] = dt[pos] - elapsed
+        return keep, dt
 
     def _flight_rate(self, E, valley, inside):
         """Rate used to draw the free flight: W_total(E) in the field-free region (direct), or
