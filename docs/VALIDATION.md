@@ -78,3 +78,40 @@ this comparison.
 * **Arrival:** 55% of electrons reach z = 0; the median arrival time is 41 ps.
 * **Upper valleys:** 7% of arrivals ever visited L (none visited X), spending 0.6% of their time there,
   and 0.2% arrive in L. At this photon energy the frozen-spin assumption for L/X affects few electrons.
+
+## Stage D: band bending (`validation/stage_d_band_bending.py`)
+
+| Check | Result |
+|---|---|
+| Fig. 16 (E_bb, W_bb vs p) | 0.6939 eV / 9.947 nm at 1e19; C21 quotes 0.694 / 9.947 |
+| Fig. 17 (E_C(z), E_z(z) at 1e19) | reproduced (peak field 1.40e8 V/m) |
+| Integrator, ballistic crossing of the band bending | max energy error 0.14 meV (1e19, default 0.25 fs step); C21's 1 fs step: 2.2 meV, always positive; error ∝ h² |
+| Closed slab, reflecting walls | Boltzmann density exp(−E_C(z)/kT) stationary to within statistics, with and without band bending |
+| Fig. 20 (depth distribution of electrons still inside at 0/100/300 ps) | qualitatively as in C21: slow drainage at 1e19 ("reduced diffusion"), fast at 5e17 |
+
+**Surface-arrival summary** (Stage C bulk + C21 band bending, absorbing surface, 300 ps, N = 3000, default
+assumptions). E_arr is the kinetic energy above the local valley minimum at z = 0.
+
+| p (cm⁻³) | hν (eV) | arrived | ESP0 → ESP(arrival) | ⟨E_arr⟩ (meV) | median t (ps) | visited L/X | arrive in L/X | ⟨t in L/X⟩, visitors | share of all time in L/X |
+|---|---|---|---|---|---|---|---|---|---|
+| 1e19 | 1.45 | 23% | 0.52 → 0.25 | 671 | 64 | 25% | 21% | 0.18 ps | 0.05% |
+| 1e19 | 1.60 | 53% | 0.49 → 0.26 | 672 | 35 | 28% | 22% | 0.23 ps | 0.09% |
+| 1e19 | 1.75 | 57% | 0.27 → 0.16 | 678 | 31 | 48% | 25% | 0.60 ps | 0.43% |
+| 1e19 | 1.90 | 69% | 0.13 → 0.06 | 688 | 18 | 66% | 27% | 0.75 ps | 0.93% |
+| 5e17 | 1.45 | 59% | 0.48 → 0.34 | 471 | 34 | 57% | 52% | 0.11 ps | 0.09% |
+| 5e17 | 1.60 | 80% | 0.50 → 0.37 | 483 | 12 | 56% | 52% | 0.15 ps | 0.20% |
+| 5e17 | 1.75 | 82% | 0.34 → 0.19 | 483 | 5.8 | 72% | 57% | 0.70 ps | 1.4% |
+| 5e17 | 1.90 | 87% | 0.13 → 0.07 | 482 | 3.9 | 82% | 62% | 1.08 ps | 3.2% |
+
+Observations:
+* **Arrival valley.** Electrons accelerated by the band bending (E_bb = 0.69 eV at 1e19, 0.63 eV at 5e17)
+  exceed the Γ–L separation (0.28 eV), so a large fraction arrive at the surface in an L valley: about
+  22–27% at 1e19, where the region is only 10 nm thick and largely crossed ballistically, and 52–62% at
+  5e17, where it is 70 nm. The arrival valley will matter for the surface model (C21 allows emission only
+  from Γ and some X valleys on (100)).
+* **Γ arrivals at 1e19** come in nearly ballistically, with ⟨E⟩ ≈ E_bb − 20 meV.
+* **Time spent in L/X** is small for near-gap excitation (≤ 0.2% of transport time), so the frozen-spin
+  assumption for L/X is unimportant there. At 1.75–1.90 eV it reaches 0.4–3%. The ESP difference between
+  arrivals that visited L/X and those that did not is mostly a selection effect (hot hh-band, spin +1
+  electrons transfer more often), not relaxation.
+* **Run time:** about 20–25 min per 1e19 run (3000 electrons, 300 ps), dominated by impurity and e–h events.
