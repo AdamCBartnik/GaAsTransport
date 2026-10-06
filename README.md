@@ -9,6 +9,7 @@ physics is applied, so these records can be handed to a separate surface/interfa
 
 * `docs/IMPLEMENTATION_PLAN.md`: plan, parameter table, mechanism table, original list of ambiguities
 * `docs/MODEL_ASSUMPTIONS.md`: **every modelling choice, its default, alternatives, and validation evidence**
+* `docs/VALIDATION.md`: comparison with C21 figures (rates, Fig. 6, Fig. 9 drift velocity, Fig. 14 spin relaxation time)
 * `refs/README.md`: references (PDFs are kept locally, not committed)
 * Units: SI internally. Use `constants.ev()` and `constants.per_cm3()` at the boundary.
 * Every formula cites its C21 equation number in the docstrings.
