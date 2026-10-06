@@ -6,6 +6,7 @@ Convert at the user boundary with the helpers below, e.g. ``ev(1.423)`` or
 """
 from scipy import constants as _c
 
+C_LIGHT = 299_792_458.0          # speed of light [m/s] (exact, SI)
 Q_E = _c.e                 # elementary charge [C]
 M0 = _c.m_e                # free-electron mass [kg]
 HBAR = _c.hbar             # reduced Planck constant [J s]

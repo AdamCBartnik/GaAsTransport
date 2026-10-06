@@ -347,7 +347,8 @@ class FastSimulation:
         self.driver = build(device)
         self.budget = budget if budget is not None else (2**62 if device == "cpu" else 256)
         if device == "cuda":
-            import cupy as cp
+            from ..backend import _import_cupy
+            cp = _import_cupy()                 # (suppresses CuPy's CUDA_PATH warning)
             self.xp = cp
             self._dev = {k: (v if np.isscalar(v) else cp.asarray(v)) for k, v in self.tables.items()}
         else:
@@ -361,11 +362,13 @@ class FastSimulation:
         if self.device == "cpu":
             self.driver(idx, budget, *args)
         else:
-            import cupy as cp
             threads = 128
             blocks = (idx.size + threads - 1) // threads
-            self.driver[blocks, threads](idx, np.int64(budget), *args)
-            cp.cuda.runtime.deviceSynchronize()
+            with warnings.catch_warnings():
+                # small launches (few electrons left) are expected and not a problem
+                warnings.filterwarnings("ignore", message=".*under-utilization.*")
+                self.driver[blocks, threads](idx, np.int64(budget), *args)
+            self.xp.cuda.runtime.deviceSynchronize()
         self.launch_seconds.append(time.perf_counter() - t0)
 
     def run(self, ens: Ensemble, rng: np.random.Generator, start_at_surface=False, surface_branch=None):

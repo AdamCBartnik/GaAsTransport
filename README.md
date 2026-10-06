@@ -60,6 +60,16 @@ from gaas_mc.parallel import run_parallel                # chunked, max_workers,
 ```
 Optional dependencies: `numba` (fast CPU engine), `numba-cuda` + CUDA 12 runtime (GPU), `cupy` (CuPy array backend).
 
+Emitted electrons as an openPMD-beamphysics `ParticleGroup` (`gaas_mc/emission.py`; output frame:
+beam along +z, i.e. z → −z and p_z → −p_z relative to the simulation; x, y from the laser spot):
+
+```python
+from gaas_mc.emission import simulate_emission
+run = simulate_emission(hv_eV=1.55, p_cm3=1e19, chi_eV=0.67, n=100_000, thickness_nm=None)
+run.particle_group, run.qe, run.esp
+```
+Example notebook: `examples/emission_particlegroup.ipynb` (needs `openpmd-beamphysics`).
+
 ## Minimal use
 
 ```python
