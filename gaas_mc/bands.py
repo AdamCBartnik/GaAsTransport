@@ -5,12 +5,14 @@
 [C21] Eq. 19:  v = hbar k / (m* (1 + 2 alpha E))
 
 Energies are kinetic energies measured from the bottom of the valley, in J.
-All functions are vectorized over numpy arrays. alpha = 0 gives the parabolic limit.
+All functions are vectorized over numpy or cupy arrays (gaas_mc/backend.py). alpha = 0 gives the
+parabolic limit.
 """
 from __future__ import annotations
 
 import numpy as np
 
+from .backend import asarray, xp_of
 from .constants import HBAR
 
 
@@ -27,23 +29,23 @@ def E_of_gamma(g, alpha):
 
 def E_of_k(k, m, alpha):
     """Eq. 2, k = |k| [1/m]."""
-    return E_of_gamma(HBAR**2 * np.asarray(k) ** 2 / (2.0 * m), alpha)
+    return E_of_gamma(HBAR**2 * asarray(k) ** 2 / (2.0 * m), alpha)
 
 
 def k_of_E(E, m, alpha):
     """|k| from Eq. 1: k = sqrt(2 m gamma(E)) / hbar."""
-    return np.sqrt(2.0 * m * gamma_of_E(np.asarray(E), alpha)) / HBAR
+    return np.sqrt(2.0 * m * gamma_of_E(asarray(E), alpha)) / HBAR
 
 
 def speed_of_E(E, m, alpha):
     """Eq. 19 magnitude: v = hbar k / (m (1 + 2 alpha E))."""
-    E = np.asarray(E)
+    E = asarray(E)
     return HBAR * k_of_E(E, m, alpha) / (m * (1.0 + 2.0 * alpha * E))
 
 
 def velocity(kvec, m, alpha):
     """Eq. 19 vector form, kvec shape (..., 3) -> v shape (..., 3)."""
-    kvec = np.asarray(kvec)
+    kvec = asarray(kvec)
     k = np.linalg.norm(kvec, axis=-1)
     E = E_of_k(k, m, alpha)
     return HBAR * kvec / (m * (1.0 + 2.0 * alpha * E))[..., None]
@@ -57,7 +59,7 @@ def dos(E, m, alpha, spin_degeneracy=2):
     Follows from g = s k^2 / (2 pi^2) dk/dE with Eq. 1. The scattering-rate formulas of [C21]
     (Eqs. 23, 25, 33, 35) all contain the factor sqrt(gamma)(1 + 2 alpha E) of the final state.
     """
-    E = np.asarray(E)
+    E = asarray(E)
     return spin_degeneracy / (4 * np.pi**2) * (2 * m / HBAR**2) ** 1.5 \
         * np.sqrt(gamma_of_E(E, alpha)) * (1 + 2 * alpha * E)
 
@@ -71,14 +73,14 @@ def random_unit_vectors(n, rng):
     cos_t = 1.0 - 2.0 * rng.random(n)
     phi = 2 * np.pi * rng.random(n)
     sin_t = np.sqrt(np.clip(1.0 - cos_t**2, 0.0, None))
-    return np.column_stack((sin_t * np.cos(phi), sin_t * np.sin(phi), cos_t))
+    return xp_of(cos_t).column_stack((sin_t * np.cos(phi), sin_t * np.sin(phi), cos_t))
 
 
 def rotate_about(u, cos_t, phi):
     """Return unit vectors at polar angle theta (cos_t) and azimuth phi relative to the unit
     vectors u (shape (n, 3)). The azimuth is measured in an arbitrary orthonormal frame
     perpendicular to u, which is fine because phi is always uniform in [0, 2 pi) here."""
-    u = np.asarray(u, dtype=float)
+    u = asarray(u, dtype=float)
     # pick a helper axis not parallel to u
     helper = np.zeros_like(u)
     use_x = np.abs(u[:, 0]) < 0.9
@@ -95,9 +97,9 @@ def rotate_about(u, cos_t, phi):
 
 def unit(kvec, rng=None):
     """Normalize rows of kvec. Rows with |k| = 0 get a random direction (needs rng)."""
-    kvec = np.asarray(kvec, dtype=float)
+    kvec = asarray(kvec, dtype=float)
     k = np.linalg.norm(kvec, axis=1)
-    out = np.empty_like(kvec)
+    out = xp_of(kvec).empty_like(kvec)
     ok = k > 0
     out[ok] = kvec[ok] / k[ok, None]
     if np.any(~ok):

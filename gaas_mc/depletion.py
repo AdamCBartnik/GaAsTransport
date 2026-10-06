@@ -41,6 +41,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .backend import asarray, dev, xp_of
 from .constants import HBAR
 
 
@@ -96,15 +97,17 @@ class DepletionModel:
             self.samples.append(LocalSample(sample, p=g.p, beta=beta, EF_h=EF_h, degenerate=bool(degen),
                                             p_ionized=N_A))
         self.n = n
+        self._phi_index = np.arange(n, dtype=float)
         self.bulk_index = n - 1
         if not np.isclose(self.beta[-1], sample.beta, rtol=1e-9):
             raise RuntimeError("local screening at phi = 0 must equal the bulk value")
 
     def frac_index(self, z):
         """Fractional grid index of phi(z) (bulk index where the field vanishes)."""
-        z = np.asarray(z, float)
+        z = asarray(z, float)
+        xp = xp_of(z)
         ph = self.field.band_edge(np.clip(z, 0.0, None))
-        return np.interp(ph, self.phi, np.arange(self.n, dtype=float))
+        return np.interp(ph, dev(self.phi, xp), dev(self._phi_index, xp))
 
     def profile(self, z):
         """Local quantities at depths z (for diagnostics)."""
@@ -144,13 +147,14 @@ class LocalMechanism:
 
     def rates_at(self, E, fi):
         """Rate at energies E and fractional phi indices fi (bilinear in the table)."""
-        g = self.E_grid
+        xp = xp_of(E)
+        g = dev(self.E_grid, xp)
         j = np.clip(np.searchsorted(g, E, side="right"), 1, g.size - 1)
         u = np.clip((E - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
         i0 = np.clip(np.floor(fi).astype(int), 0, self.depletion.n - 1)
         i1 = np.minimum(i0 + 1, self.depletion.n - 1)
         w = np.clip(fi - i0, 0.0, 1.0)
-        T = self.table
+        T = dev(self.table, xp)
         r0 = T[i0, j - 1] * (1 - u) + T[i0, j] * u
         r1 = T[i1, j - 1] * (1 - u) + T[i1, j] * u
         return r0, r1, w, i0, i1
@@ -165,14 +169,15 @@ class LocalMechanism:
         return np.where(rng.random(E.size) < p1, j1, j0)
 
     def scatter(self, k, E, rng, phi_index=None):
-        E = np.asarray(E, float)
+        E = asarray(E, float)
         if phi_index is None:
             return self.bulk.scatter(k, E, rng)
-        j = self.choose_variant(E, np.asarray(phi_index, float), rng)
-        k_new = np.array(k, float, copy=True)
-        acc = np.zeros(E.size, bool)
-        vnew = np.full(E.size, self.valley_from)
-        for jj in np.unique(j):
+        xp = xp_of(E)
+        j = self.choose_variant(E, asarray(phi_index, float), rng)
+        k_new = asarray(k, float).copy()
+        acc = xp.zeros(E.size, bool)
+        vnew = xp.full(E.size, self.valley_from)
+        for jj in xp.unique(j).tolist():
             sel = j == jj
             kn, a, vn = self.variants[jj].scatter(k[sel], E[sel], rng)
             k_new[sel], acc[sel], vnew[sel] = kn, a, vn

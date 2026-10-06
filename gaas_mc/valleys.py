@@ -20,32 +20,36 @@ from __future__ import annotations
 
 import numpy as np
 
+from .backend import asarray, dev, xp_of
+
 L_DIRS = np.array([[1, 1, 1], [1, -1, -1], [-1, 1, -1], [-1, -1, 1]], float)
 X_DIRS = np.eye(3)
 N_EQUIV = (1, 4, 3)
+_N_EQUIV = np.array(N_EQUIV)
 
 
 def valley_center(valley, eqv, a):
     """Crystal wavevector of each valley minimum [1/m], shape (n, 3)."""
-    valley = np.asarray(valley)
-    eqv = np.asarray(eqv)
-    out = np.zeros((valley.size, 3))
+    valley = asarray(valley)
+    eqv = asarray(eqv)
+    xp = xp_of(valley, eqv)
+    out = xp.zeros((valley.size, 3))
     L = valley == 1
     X = valley == 2
-    out[L] = (np.pi / a) * L_DIRS[eqv[L]]
-    out[X] = (2 * np.pi / a) * X_DIRS[eqv[X]]
+    out[L] = (np.pi / a) * dev(L_DIRS, xp)[eqv[L]]
+    out[X] = (2 * np.pi / a) * dev(X_DIRS, xp)[eqv[X]]
     return out
 
 
 def choose_equivalent_valley(v_old, eqv_old, v_new, rng):
     """New equivalent-valley index after a transfer v_old -> v_new (arrays)."""
-    v_old, v_new = np.asarray(v_old), np.asarray(v_new)
-    n_eq = np.array(N_EQUIV)[v_new]
+    v_old, v_new = asarray(v_old), asarray(v_new)
+    n_eq = dev(_N_EQUIV, xp_of(v_new))[v_new]
     same = v_old == v_new
     out = np.floor(rng.random(v_new.size) * n_eq).astype(np.int8)       # different type: uniform
     if np.any(same & (n_eq > 1)):                                        # same type: one of the others
         sel = same & (n_eq > 1)
         shift = 1 + np.floor(rng.random(int(sel.sum())) * (n_eq[sel] - 1)).astype(np.int8)
-        out[sel] = ((np.asarray(eqv_old)[sel] + shift) % n_eq[sel]).astype(np.int8)
+        out[sel] = ((asarray(eqv_old)[sel] + shift) % n_eq[sel]).astype(np.int8)
     out[v_new == 0] = 0
     return out

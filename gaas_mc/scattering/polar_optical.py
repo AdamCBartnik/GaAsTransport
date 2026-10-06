@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..backend import asarray, xp_of
 from ..constants import HBAR, Q_E
 from .base import Mechanism, bose, new_k_from_angle
 
@@ -138,12 +139,13 @@ class PolarOptical(Mechanism):
         return ((1 + xi) - np.exp(r * np.log1p(2 * xi))) / xi
 
     def scatter(self, k, E, rng):
-        E = np.asarray(E, dtype=float)
+        E = asarray(E, dtype=float)
+        xp = xp_of(E)
         kk, kp, Ep = self._k_kp(E)
         cos_t = self._sample_cos_eq30(kk, kp, rng)
         if self.angle == "screened" and self.a > 0:
             # rejection: proposal density ~ 1/u (Eq. 30), target ~ u/(u+a)^2
-            todo = np.arange(len(E))
+            todo = xp.arange(len(E))
             while todo.size:
                 u = kk[todo] ** 2 + kp[todo] ** 2 - 2 * kk[todo] * kp[todo] * cos_t[todo]
                 acc = rng.random(todo.size) < (u / (u + self.a)) ** 2
@@ -152,4 +154,4 @@ class PolarOptical(Mechanism):
                     cos_t[todo] = self._sample_cos_eq30(kk[todo], kp[todo], rng)
         cos_t = np.clip(cos_t, -1.0, 1.0)
         k_new = new_k_from_angle(k, Ep, cos_t, rng, self.m, self.alpha)
-        return k_new, np.ones(len(E), bool), np.full(len(E), self.valley_from)
+        return k_new, xp.ones(len(E), bool), xp.full(len(E), self.valley_from)

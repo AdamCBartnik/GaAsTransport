@@ -27,6 +27,7 @@ import numpy as np
 from scipy import integrate, optimize
 
 from . import bands
+from .backend import asarray, dev, xp_of
 from .constants import HBAR
 
 BAND_MASS_ATTR = {"hh": "m_hh", "lh": "m_lh"}
@@ -102,7 +103,7 @@ class HoleGas:
 
     def occupation(self, E):
         """f(E_h) for hole kinetic energy E_h >= 0 [J]."""
-        x = np.asarray(E, float) / self.kT - self.eta
+        x = asarray(E, float) / self.kT - self.eta
         if self.statistics == "fermi_dirac":
             return 0.5 * (1 - np.tanh(0.5 * x))
         return np.exp(-x)
@@ -119,7 +120,9 @@ class HoleGas:
 
     def sample_energy(self, n, rng):
         """Hole kinetic energies [J] drawn from sqrt(E) f(E)."""
-        return self.kT * np.interp(rng.random(n), self._cdf, self._x)
+        u = rng.random(n)
+        xp = xp_of(u)
+        return self.kT * np.interp(u, dev(self._cdf, xp), dev(self._x, xp))
 
     def sample_k(self, band, n, rng):
         """Hole wavevectors (n, 3) for band 'hh' or 'lh': isotropic, |k| from the energy distribution."""

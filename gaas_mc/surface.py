@@ -20,6 +20,7 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 
+from .backend import to_host
 from .constants import HBAR
 
 
@@ -97,6 +98,10 @@ class SurfaceArrivals:
             out[f.name] = np.concatenate([getattr(p, f.name) for p in parts])
         return cls(**out, band_edge_at_surface=parts[0].band_edge_at_surface, mechanism_names=tuple(names))
 
+    def to_host(self):
+        out = {f.name: to_host(getattr(self, f.name)) for f in fields(self)}
+        return type(self)(**out)
+
     def save_npz(self, path):
         d = {f.name: getattr(self, f.name) for f in fields(self) if f.name != "mechanism_names"}
         d["band_edge_at_surface"] = np.array(self.band_edge_at_surface)
@@ -132,6 +137,9 @@ class Emissions:
 
     def __len__(self):
         return self.t.size
+
+    def to_host(self):
+        return type(self)(**{f.name: to_host(getattr(self, f.name)) for f in fields(self)})
 
     @property
     def E_perp(self):

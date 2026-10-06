@@ -45,6 +45,10 @@ dt_max_field: velocity-Verlet substep in the field region. Default (None): h = m
               omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
               C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
               < 0.15 meV, versus ~2 meV for the 1 fs step used in C21 (second order, tested).
+
+Backend (gaas_mc/backend.py): backend="numpy" (default) or "cupy" (GPU). The loop below is the same
+code for both; with "cupy" the ensemble, the tables and the random numbers live on the device, and
+the Result is returned as NumPy arrays.
 """
 from __future__ import annotations
 
@@ -54,6 +58,7 @@ import numpy as np
 
 from . import bands
 from .assumptions import DEFAULT
+from .backend import add_at, asarray, dev, device_rng, get_xp, to_host
 from .depletion import LocalMechanism
 from .valleys import choose_equivalent_valley, valley_center
 from .constants import EV, FS, HBAR, PS, Q_E
@@ -100,7 +105,9 @@ class Simulation:
     def __init__(self, sample, mechanisms, spin_model=None, field=None, t_max=370 * PS,
                  surface="absorb", z_back=None, E_table_max=2.0 * EV, n_table=4001,
                  dt_max_field=None, snapshot_times=(), log_events=False, gamma0_margin=1.02,
-                 assumptions=DEFAULT, back="absorb"):
+                 assumptions=DEFAULT, back="absorb", backend="numpy"):
+        self.backend = backend
+        self.xp = get_xp(backend)
         self.sample = sample
         self.material = sample.material
         self.mechanisms = list(mechanisms)
@@ -169,6 +176,8 @@ class Simulation:
         self.thresholds = np.array([m.threshold for m in self.mechanisms])
         self.E_table_max = E_max
         nv = len(self.material.valleys)
+        self._m_valley = np.array([v.m_eff for v in self.material.valleys])
+        self._a_valley = np.array([v.alpha for v in self.material.valleys])
         self.mech_by_valley = [[i for i, m in enumerate(self.mechanisms) if m.valley_from == v]
                                for v in range(nv)]
         self.rate_table = np.array([m.rate(self.E_grid) for m in self.mechanisms]).reshape(
@@ -203,19 +212,20 @@ class Simulation:
         """Interpolated rate matrix (M_v, n) for the mechanisms of one valley. fi: fractional index
         of the local potential (depletion model) per particle; None or no depletion model = bulk."""
         idx = self.mech_by_valley[valley_index]
-        E = np.atleast_1d(E)
+        xp = self.xp
+        E = xp.atleast_1d(E)
         # one bracket search for all mechanisms (same as np.interp per row, with end clamping)
-        g = self.E_grid
+        g = dev(self.E_grid, xp)
         j = np.clip(np.searchsorted(g, E, side="right"), 1, g.size - 1)
         w = np.clip((E - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
-        T = self.rate_table[idx]
+        T = dev(self.rate_table, xp)[idx]
         R = T[:, j - 1] * (1 - w) + T[:, j] * w
         if fi is not None and self.depl is not None:
             for row, i in enumerate(idx):
                 if self.is_local[i]:
                     r0, r1, ww, _, _ = self.mechanisms[i].rates_at(E, fi)
                     R[row] = (1 - ww) * r0 + ww * r1
-        return np.where(E[None, :] > self.thresholds[idx][:, None], R, 0.0)
+        return np.where(E[None, :] > dev(self.thresholds, xp)[idx][:, None], R, 0.0)
 
     def phi_index(self, z):
         """Fractional local-potential index (None without a depletion model)."""
@@ -225,18 +235,16 @@ class Simulation:
     # Free flight
     # ------------------------------------------------------------------------------------
     def _valley_params(self, valley):
-        vs = self.material.valleys
-        m = np.array([v.m_eff for v in vs])[valley]
-        a = np.array([v.alpha for v in vs])[valley]
-        return m, a
+        xp = self.xp
+        return dev(self._m_valley, xp)[valley], dev(self._a_valley, xp)[valley]
 
     def in_field(self, z, k, E, valley):
         """True where the particle is inside the field region (z < z_max). A particle exactly at
         z_max counts as inside if it is moving toward the surface."""
         if self.z_field <= 0:
-            return np.zeros(z.size, bool)
+            return self.xp.zeros(z.size, bool)
         if np.isinf(self.z_field):
-            return np.ones(z.size, bool)
+            return self.xp.ones(z.size, bool)
         m, a = self._valley_params(valley)
         vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
         return (z < self.z_field) | ((z <= self.z_field * (1 + 1e-12)) & (vz < 0))
@@ -246,9 +254,9 @@ class Simulation:
         (z, k, E, dt_used, event), event in {EV_NONE, EV_SURFACE, EV_BACK, EV_REGION}. A particle
         that reaches an absorbing boundary or the field-region boundary stops there, and dt_used
         is the time at which it did."""
-        z = z.copy(); k = k.copy(); E = E.copy(); dt = np.asarray(dt, float)
+        z = z.copy(); k = k.copy(); E = E.copy(); dt = asarray(dt, float)
         m, a = self._valley_params(valley)
-        event = np.zeros(z.size, np.int8)
+        event = self.xp.zeros(z.size, np.int8)
         dt_used = dt.copy()
         inside = self.in_field(z, k, E, valley)
         out = ~inside
@@ -263,10 +271,11 @@ class Simulation:
     def _propagate_free(self, z, k, E, m, a, dt):
         """Straight-line flight where the field vanishes (exact)."""
         n = z.size
-        event = np.zeros(n, np.int8)
+        xp = self.xp
+        event = xp.zeros(n, np.int8)
         vz = HBAR * k[:, 2] / (m * (1 + 2 * a * E))
         z1 = z + vz * dt
-        t_ev = np.full(n, np.inf)
+        t_ev = xp.full(n, np.inf)
         with np.errstate(divide="ignore", invalid="ignore"):
             if 0 < self.z_field < np.inf:                   # entering the field region
                 hr = (z1 < self.z_field) & (vz < 0)
@@ -306,7 +315,7 @@ class Simulation:
         reflecting surface, and likewise about a reflecting back wall. A substep that ends beyond the
         wall, mirrored back (z -> -z, k_z -> -k_z), is then the reflected trajectory to integrator
         order, and time always advances."""
-        z = np.asarray(z, float)
+        z = asarray(z, float)
         if self.surface == "reflect" and np.any(z < 0):
             zi = np.where(z < 0, -z, z)
             Ez = self.field.Ez(zi)
@@ -334,9 +343,10 @@ class Simulation:
         boundary (surface, back contact, or field-region boundary z_max) is redone with the
         interpolated fraction so the particle stops on the boundary."""
         n = z.size
-        event = np.zeros(n, np.int8)
+        xp = self.xp
+        event = xp.zeros(n, np.int8)
         remaining = dt.copy()
-        elapsed = np.zeros(n)
+        elapsed = xp.zeros(n)
         zr = self.z_field if 0 < self.z_field < np.inf else None
         if self.surface_model is not None:
             # just reflected by the surface model (z = 0, moving inward) while the field pushes back:
@@ -355,7 +365,7 @@ class Simulation:
                     event[bounce] = EV_SURFACE
         active = remaining > 0
         while np.any(active):
-            ia = np.flatnonzero(active)
+            ia = xp.flatnonzero(active)
             h = np.minimum(remaining[ia], self.dt_max)
             z_old, k_old = z[ia].copy(), k[ia].copy()
             z_new, k_new = self._kdk(z_old.copy(), k_old.copy(), m[ia], a[ia], h)
@@ -370,9 +380,10 @@ class Simulation:
                 rb = z_new > self.z_back
                 z_new[rb] = 2 * self.z_back - z_new[rb]
                 k_new[rb, 2] = -k_new[rb, 2]
-            cross_s = (z_new <= 0) if self.surface == "absorb" else np.zeros(ia.size, bool)
-            cross_b = (z_new >= self.z_back) if (self.z_back is not None and self.back == "absorb")                 else np.zeros(ia.size, bool)
-            cross_r = (z_new >= zr) & ~cross_b if zr is not None else np.zeros(ia.size, bool)
+            cross_s = (z_new <= 0) if self.surface == "absorb" else xp.zeros(ia.size, bool)
+            cross_b = ((z_new >= self.z_back) if (self.z_back is not None and self.back == "absorb")
+                       else xp.zeros(ia.size, bool))
+            cross_r = (z_new >= zr) & ~cross_b if zr is not None else xp.zeros(ia.size, bool)
             cr = cross_s | cross_b | cross_r
             if np.any(cr):
                 zb = np.where(cross_s, 0.0, np.where(cross_b, self.z_back or 0.0, zr or 0.0))
@@ -403,11 +414,14 @@ class Simulation:
             start_at_surface=False) -> Result:
         """start_at_surface: electrons at z = 0 with k_z < 0 (e.g. Ensemble.from_arrivals of an
         earlier run with an absorbing surface) meet the surface model first. The Eq. 54 arrival spin
-        test is not repeated (it was applied when those arrivals were recorded)."""
-        ens = ens.copy()
+        test is not repeated (it was applied when those arrivals were recorded).
+        rng: a NumPy Generator; with backend="cupy" a device generator is seeded from it."""
+        xp = self.xp
+        ens = ens.copy() if xp is np else ens.to(xp)
+        rng = device_rng(rng, xp)
         N = len(ens)
         M = len(self.mechanisms)
-        n_events = np.zeros((N, M), np.int32)
+        n_events = xp.zeros((N, M), np.int32)
         n_real = np.zeros(M, np.int64)
         n_rej = np.zeros(M, np.int64)
         n_self = 0
@@ -418,8 +432,8 @@ class Simulation:
         snaps = None
         if self.snapshot_times.size:
             nt = self.snapshot_times.size
-            snaps = Snapshots(self.snapshot_times, np.full((nt, N), np.nan), np.full((nt, N), np.nan),
-                              np.zeros((nt, N), np.int8), np.full((nt, N), -1, np.int8))
+            snaps = Snapshots(self.snapshot_times, xp.full((nt, N), np.nan), xp.full((nt, N), np.nan),
+                              xp.zeros((nt, N), np.int8), xp.full((nt, N), -1, np.int8))
 
         if np.any(ens.E > self.E_table_max):
             raise ValueError("initial energies exceed the rate-table range; raise E_table_max")
@@ -427,19 +441,20 @@ class Simulation:
         if start_at_surface:
             if self.surface_model is None:
                 raise ValueError("start_at_surface needs a surface model")
-            ih = np.flatnonzero((ens.status == ALIVE) & (ens.z <= 0) & (ens.k[:, 2] < 0))
+            ih = xp.flatnonzero((ens.status == ALIVE) & (ens.z <= 0) & (ens.k[:, 2] < 0))
             arrivals.append(self._arrival_record(ens, ih, n_events))
             ens.n_surface[ih] += 1
             self._surface_interaction(ens, ih, rng, emissions)
 
         it = 0
-        idx = np.flatnonzero(ens.status == ALIVE)
+        idx = xp.flatnonzero(ens.status == ALIVE)
+        gamma0 = dev(self.gamma0, xp)
         while idx.size:
             it += 1
             if it > max_iterations:
                 raise RuntimeError("max_iterations exceeded")
             v = ens.valley[idx]
-            if np.any(self.gamma0[v] <= 0):
+            if np.any(gamma0[v] <= 0):
                 raise RuntimeError("an electron is in a valley without mechanisms")
             if np.any(ens.E[idx] > self.E_table_max):
                 raise RuntimeError("electron energy left the rate table; raise E_table_max")
@@ -458,7 +473,7 @@ class Simulation:
             ens.z[idx], ens.k[idx], ens.E[idx] = z1, k1, E1
             ens.t[idx] = t0 + dt_used
             ens.dt_spin[idx] += dt_used
-            np.add.at(ens.time_in_valley, (idx, v), dt_used)
+            add_at(ens.time_in_valley, (idx, v), dt_used)
 
             # --- boundary events
             hit = event == EV_SURFACE
@@ -489,17 +504,20 @@ class Simulation:
             isc = idx[sc]
             if isc.size:
                 n_self += self._scatter(ens, isc, G[sc], rng, n_events, n_real, n_rej, log)
-            idx = np.flatnonzero(ens.status == ALIVE)
+            idx = xp.flatnonzero(ens.status == ALIVE)
 
-        arr = SurfaceArrivals.concatenate(arrivals, M, self.names)
+        arr = SurfaceArrivals.concatenate(arrivals, M, self.names).to_host()
         if self.log_events:
-            log = {key: (np.concatenate(val) if val else np.zeros(0)) for key, val in log.items()}
+            log = {key: (to_host(xp.concatenate(val)) if val else np.zeros(0)) for key, val in log.items()}
         else:
             log = {}
-        return Result(ensemble=ens, arrivals=arr, snapshots=snaps, mechanism_names=self.names,
+        if snaps is not None:
+            snaps = Snapshots(snaps.times, to_host(snaps.E), to_host(snaps.z), to_host(snaps.spin),
+                              to_host(snaps.valley))
+        em = Emissions.concatenate(emissions).to_host() if self.surface_model is not None else None
+        return Result(ensemble=ens.to_host(), arrivals=arr, snapshots=snaps, mechanism_names=self.names,
                       n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej,
-                      flight_mode=self.flight_mode, event_log=log,
-                      emissions=Emissions.concatenate(emissions) if self.surface_model is not None else None)
+                      flight_mode=self.flight_mode, event_log=log, emissions=em)
 
     def _surface_interaction(self, ens, ih, rng, emissions):
         """Ask the surface model what happens to electrons ih at z = 0: emitted, trapped, or reflected
@@ -526,11 +544,11 @@ class Simulation:
     def _flight_rate(self, E, valley, inside):
         """Rate used to draw the free flight: W_total(E) in the field-free region (direct), or
         Gamma0 inside the field region or when self-scattering is forced."""
-        G = self.gamma0[valley].astype(float)
+        G = dev(self.gamma0, self.xp)[valley].astype(float)
         if self.flight_mode == "self_scattering":
             return G
         free = ~inside
-        for vv in np.unique(valley[free]):
+        for vv in self.xp.unique(valley[free]).tolist():
             sel = free & (valley == vv)
             G[sel] = self.rates_at(E[sel], vv).sum(axis=0)
         return G
@@ -545,18 +563,19 @@ class Simulation:
         ens.dt_spin[ii] = 0.0
 
     def _inv_tau_s_at(self, E, valley, fi=None):
-        out = np.zeros_like(E)
-        T = self.inv_tau_s
-        for vv in np.unique(valley):
+        xp = self.xp
+        out = xp.zeros_like(E)
+        T = dev(self.inv_tau_s, xp)
+        g = dev(self.E_grid, xp)
+        for vv in xp.unique(valley).tolist():
             sel = valley == vv
             if fi is None or T.shape[1] == 1:
-                out[sel] = np.interp(E[sel], self.E_grid, T[vv, -1])
+                out[sel] = np.interp(E[sel], g, T[vv, -1])
                 continue
             f = fi[sel]
             i0 = np.clip(np.floor(f).astype(int), 0, T.shape[1] - 1)
             i1 = np.minimum(i0 + 1, T.shape[1] - 1)
             w = f - i0
-            g = self.E_grid
             j = np.clip(np.searchsorted(g, E[sel], side="right"), 1, g.size - 1)
             u = np.clip((E[sel] - g[j - 1]) / (g[j] - g[j - 1]), 0.0, 1.0)
             r0 = T[vv, i0, j - 1] * (1 - u) + T[vv, i0, j] * u
@@ -570,8 +589,9 @@ class Simulation:
         n_self = 0
         # freeze pre-event valleys: an electron that transfers valleys inside this loop
         # must not be scattered again in the destination valley's pass
+        xp = self.xp
         v_before = ens.valley[isc].copy()
-        for vv in np.unique(v_before):
+        for vv in xp.unique(v_before).tolist():
             in_v = v_before == vv
             iv = isc[in_v]
             mech_idx = self.mech_by_valley[vv]
@@ -618,10 +638,10 @@ class Simulation:
                 n_events[acc, mi] += 1
                 n_real[mi] += acc.size
                 if self.log_events:
-                    log["mech"].append(np.full(acc.size, mi))
+                    log["mech"].append(xp.full(acc.size, mi))
                     log["E_before"].append(E_before[accepted])
                     log["E_after"].append(ens.E[acc].copy())
-                    log["valley_before"].append(np.full(acc.size, vv))
+                    log["valley_before"].append(xp.full(acc.size, vv))
                     log["valley_after"].append(ens.valley[acc].copy())
         return n_self
 

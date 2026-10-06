@@ -38,6 +38,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .backend import asarray, dev, xp_of
 from .constants import EV, HBAR, M0, NM
 
 EMIT, TRAP, REFLECT = 1, 2, 3
@@ -60,6 +61,10 @@ class C21Surface:
     def __post_init__(self):
         if self.matching_mass not in ("velocity", "band_edge"):
             raise ValueError(f"matching_mass={self.matching_mass!r}")
+        vs = self.material.valleys
+        self._offset = np.array([v.offset for v in vs])
+        self._m = np.array([v.m_eff for v in vs])
+        self._alpha = np.array([v.alpha for v in vs])
 
     # ------------------------------------------------------------------ geometry / momentum ---
     def fold_kpar(self, K):
@@ -70,7 +75,7 @@ class C21Surface:
         # coordinates in the reciprocal basis b1 = g(1, 1), b2 = g(1, -1)
         u = (kx + ky) / (2 * g)
         v = (kx - ky) / (2 * g)
-        best = np.full(kx.size, np.inf)
+        best = xp_of(kx).full(kx.size, np.inf)
         for du in (0, 1):
             for dv in (0, 1):
                 m = np.floor(u) + du
@@ -82,8 +87,7 @@ class C21Surface:
 
     def total_energy(self, E_kin, valley):
         """E_tot relative to the Gamma band edge at z = 0 [J]."""
-        offs = np.array([v.offset for v in self.material.valleys])
-        return offs[valley] + E_kin
+        return dev(self._offset, xp_of(valley))[valley] + E_kin
 
     def barrier(self, x):
         """Potential on the vacuum side, relative to the Gamma band edge at z = 0 (Fig. 15(c))."""
@@ -94,10 +98,11 @@ class C21Surface:
         """Transmission probability for incident normal wavevector k_in (> 0, toward vacuum) with
         incident mass m_in, total energy E_tot (relative to the Gamma band edge at the surface), and
         conserved transverse wavevector kpar. Arrays of equal length."""
-        E_tot, k_in, m_in, kpar = (np.atleast_1d(np.asarray(x, float)) for x in (E_tot, k_in, m_in, kpar))
+        xp = xp_of(E_tot, k_in, m_in, kpar)
+        E_tot, k_in, m_in, kpar = (xp.atleast_1d(asarray(x, float)) for x in (E_tot, k_in, m_in, kpar))
         n = E_tot.size
         eps_vac = E_tot - self.chi - HBAR**2 * kpar**2 / (2 * M0)       # normal energy in vacuum
-        T = np.zeros(n)
+        T = xp.zeros(n)
         ok = (eps_vac > 0) & (k_in > 0)
         if not ok.any():
             return T
@@ -112,14 +117,14 @@ class C21Surface:
         ms = [min_]
         for Vj in V:
             ks.append(np.sqrt((2 * M0 * (Et - Vj - k_par_term) / HBAR**2).astype(complex)))
-            ms.append(np.full(Et.size, M0))
+            ms.append(xp.full(Et.size, M0))
         k_out = np.sqrt(2 * M0 * (Et - self.chi - k_par_term)) / HBAR
         ks.append(k_out.astype(complex))
-        ms.append(np.full(Et.size, M0))
+        ms.append(xp.full(Et.size, M0))
         x_if = np.arange(N + 1) * dx                                      # interfaces 0..N
         # back-propagate from the vacuum: A = 1 (transmitted), B = 0
-        A = np.ones(Et.size, complex)
-        B = np.zeros(Et.size, complex)
+        A = xp.ones(Et.size, complex)
+        B = xp.zeros(Et.size, complex)
         for i in range(N, -1, -1):                                        # interface between i and i+1
             ka, ma = ks[i], ms[i]
             kb, mb = ks[i + 1], ms[i + 1]
@@ -143,20 +148,20 @@ class C21Surface:
         particles: E_tot, eps_vac, kpar, T, and the vacuum momentum p_vac (n, 3) and vacuum kinetic
         energy E_vac_kin (relative to the vacuum level), meaningful for the emitted ones.
         """
-        k = np.asarray(k, float)
-        valley = np.asarray(valley)
-        mat = self.material
-        m = np.array([v.m_eff for v in mat.valleys])[valley]
-        a = np.array([v.alpha for v in mat.valleys])[valley]
+        k = asarray(k, float)
+        valley = asarray(valley)
+        xp = xp_of(k)
+        m = dev(self._m, xp)[valley]
+        a = dev(self._alpha, xp)[valley]
         E_tot = self.total_energy(E, valley)
         kpar = self.fold_kpar(K)
-        outcome = np.full(E.size, REFLECT, np.int8)
+        outcome = xp.full(E.size, REFLECT, np.int8)
         # 1. absolute total energy below the asymptotic vacuum level E_vac = E_C,Gamma(0) + chi:
         #    surface-trapped and terminated (C21 Sec. IV); no barrier dynamics
         trapped = E_tot < self.chi
         outcome[trapped] = TRAP
         # 2. E_tot >= E_vac: barrier transmission; transmitted -> emitted, otherwise reflected
-        T = np.zeros(E.size)
+        T = xp.zeros(E.size)
         up = ~trapped
         m_v = m * (1 + 2 * a * E) if self.matching_mass == "velocity" else m
         T[up] = self.transmission(E_tot[up], -k[up, 2], m_v[up], kpar[up])
@@ -168,7 +173,7 @@ class C21Surface:
         Kp = K[:, :2]
         nrm = np.linalg.norm(Kp, axis=1)
         scale = np.where(nrm > 0, kpar / np.where(nrm > 0, nrm, 1), 0.0)
-        p_vac = np.zeros((E.size, 3))
+        p_vac = xp.zeros((E.size, 3))
         p_vac[:, :2] = HBAR * Kp * scale[:, None]
         p_vac[:, 2] = -np.sqrt(2 * M0 * np.clip(eps, 0, None))
         info = dict(E_tot=E_tot, eps_vac=eps, kpar=kpar, T=T, p_vac=p_vac, E_vac_kin=E_tot - self.chi)

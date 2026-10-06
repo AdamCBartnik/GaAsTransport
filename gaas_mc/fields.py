@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from .backend import asarray, xp_of
 from .constants import Q_E
 
 
@@ -27,10 +28,12 @@ class NoField:
     z_max = 0.0
 
     def Ez(self, z):
-        return np.zeros_like(np.asarray(z, float))
+        z = asarray(z, float)
+        return xp_of(z).zeros_like(z)
 
     def band_edge(self, z):
-        return np.zeros_like(np.asarray(z, float))
+        z = asarray(z, float)
+        return xp_of(z).zeros_like(z)
 
 
 class UniformField:
@@ -41,10 +44,11 @@ class UniformField:
         self.E0 = float(Ez)
 
     def Ez(self, z):
-        return np.full_like(np.asarray(z, float), self.E0)
+        z = asarray(z, float)
+        return xp_of(z).full_like(z, self.E0)
 
     def band_edge(self, z):
-        return Q_E * self.E0 * np.asarray(z, float)
+        return Q_E * self.E0 * asarray(z, float)
 
 
 class C21BandBending:
@@ -65,12 +69,12 @@ class C21BandBending:
         self.z_max = self.W
 
     def Ez(self, z):
-        z = np.asarray(z, float)
+        z = asarray(z, float)
         x = np.clip(1.0 - z / self.W, 0.0, None)
         return 2 * self.E_bb / (Q_E * self.W) * x                         # Eq. 62
 
     def band_edge(self, z):
-        z = np.asarray(z, float)
+        z = asarray(z, float)
         x = np.clip(1.0 - z / self.W, 0.0, None)
         return -self.E_bb * x**2                                          # Eq. 61
 

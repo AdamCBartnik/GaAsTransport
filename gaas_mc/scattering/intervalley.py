@@ -22,6 +22,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import bands
+from ..backend import asarray, xp_of
 from ..constants import HBAR
 from .base import Mechanism, bose, new_k_isotropic
 
@@ -75,8 +76,9 @@ class Intervalley(Mechanism):
         return self.rate(E)
 
     def scatter(self, k, E, rng):
-        Ep = self.final_energy(np.asarray(E, float))
+        Ep = self.final_energy(asarray(E, float))
         if np.any(Ep <= 0):
             raise RuntimeError(f"{self.name}: forbidden transition selected")
+        xp = xp_of(Ep)
         k_new = new_k_isotropic(Ep, rng, self.vj.m_eff, self.vj.alpha)
-        return k_new, np.ones(Ep.size, bool), np.full(Ep.size, self.valley_to)
+        return k_new, xp.ones(Ep.size, bool), xp.full(Ep.size, self.valley_to)

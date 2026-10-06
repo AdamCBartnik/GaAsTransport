@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..backend import asarray, xp_of
 from ..constants import HBAR
 from .base import Mechanism, new_k_isotropic
 
@@ -27,12 +28,13 @@ class AcousticPhonon(Mechanism):
                    / (mat.c_l * np.pi * HBAR**4))
 
     def rate(self, E):
-        E = np.asarray(E, dtype=float)
+        E = asarray(E, dtype=float)
         return self._C * np.sqrt(self.gamma(E)) * (1 + 2 * self.alpha * E)
 
     def momentum_rate(self, E):
         return self.rate(E)
 
     def scatter(self, k, E, rng):
+        xp = xp_of(E)
         k_new = new_k_isotropic(E, rng, self.m, self.alpha)
-        return k_new, np.ones(len(E), bool), np.full(len(E), self.valley_from)
+        return k_new, xp.ones(len(E), bool), xp.full(len(E), self.valley_from)

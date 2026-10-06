@@ -38,6 +38,7 @@ from __future__ import annotations
 import numpy as np
 
 from .. import bands
+from ..backend import asarray, xp_of
 from ..constants import HBAR, Q_E
 from .base import Mechanism
 
@@ -68,9 +69,9 @@ class ElectronHole(Mechanism):
         self.last = None
 
     def m_e(self, E):
-        E = np.asarray(E, float)
+        E = asarray(E, float)
         if self.mass_model == "band_edge":
-            return np.full_like(E, self.m)
+            return xp_of(E).full_like(E, self.m)
         return self.m * (1 + 2 * self.alpha * E)
 
     def m_R(self, E):
@@ -98,12 +99,13 @@ class ElectronHole(Mechanism):
                     + HBAR**2 * np.sum(kh * kh, axis=1) / (2 * mh) - E_tot)
 
         n = c.shape[0]
-        lo = np.zeros(n)
+        xp = xp_of(c)
+        lo = xp.zeros(n)
         f_lo = F(lo)
         ok = f_lo < 0
         # --- Newton
         s = s_guess.astype(float).copy()
-        done = np.zeros(n, bool)
+        done = xp.zeros(n, bool)
         tol = 1e-13 * np.abs(E_tot)
         for _ in range(12):
             ke = c - 0.5 * s[:, None] * ghat
@@ -125,7 +127,7 @@ class ElectronHole(Mechanism):
         if np.all(good | ~ok):
             return s, ok
         # --- bisection fallback for the remaining rows
-        rest = np.flatnonzero(ok & ~good)
+        rest = xp.flatnonzero(ok & ~good)
         s_b, _ = self._bisect(c[rest], K[rest], ghat[rest], E_tot[rest], s_guess[rest])
         s[rest] = s_b
         return s, ok
@@ -140,7 +142,7 @@ class ElectronHole(Mechanism):
                     + HBAR**2 * np.sum(kh * kh, axis=1) / (2 * mh) - E_tot)
 
         n = c.shape[0]
-        lo = np.zeros(n)
+        lo = xp_of(c).zeros(n)
         f_lo = F(lo)
         ok = f_lo < 0
         hi = np.maximum(2.0 * s_guess, 1.0)
@@ -158,10 +160,11 @@ class ElectronHole(Mechanism):
         return 0.5 * (lo + hi), ok
 
     def scatter(self, k, E, rng):
-        k = np.asarray(k, float)
-        E = np.asarray(E, float)
+        k = asarray(k, float)
+        E = asarray(E, float)
+        xp = xp_of(E)
         n = E.size
-        accepted = np.zeros(n, bool)
+        accepted = xp.zeros(n, bool)
         k_new = k.copy()
         self.stats["attempted"] += n
         k0 = self.holes.sample_k(self.band, n, rng)
@@ -172,9 +175,9 @@ class ElectronHole(Mechanism):
         b = self.beta
         a1 = rng.random(n) < 2 * g * b / (g**2 + b**2)                                  # Eq. 40
         self.stats["rejected_eq40"] += int((~a1).sum())
-        i1 = np.flatnonzero(a1)
+        i1 = xp.flatnonzero(a1)
         if i1.size == 0:
-            return k_new, accepted, np.full(n, self.valley_from)
+            return k_new, accepted, xp.full(n, self.valley_from)
         g1 = g[i1]
         r = rng.random(i1.size)
         cos_t = 1 - 2 * r / (1 + g1**2 * (1 - r) / b**2)                                # Eq. 42
@@ -193,7 +196,7 @@ class ElectronHole(Mechanism):
         elif self.pauli == "step_c21":
             free = Eh_new >= self.sample.EF_h                                           # Eq. 44
         else:
-            free = np.ones(i1.size, bool)
+            free = xp.ones(i1.size, bool)
         self.stats["rejected_pauli"] += int((ok & ~free).sum())
         acc = ok & free
         accepted[i1[acc]] = True
@@ -202,7 +205,7 @@ class ElectronHole(Mechanism):
         if self.record:
             self.last = dict(idx=i1[acc], k=k[i1[acc]], k0=k0[i1[acc]], kp=kp[acc], k0p=k0p[acc],
                              E=E[i1[acc]], g=g1[acc], s=s[acc])
-        return k_new, accepted, np.full(n, self.valley_from)
+        return k_new, accepted, xp.full(n, self.valley_from)
 
     def effective_rate(self, E, rng, n=20_000):
         """Monte Carlo estimate of the actual (accepted) rate at energy E [J] for an isotropic

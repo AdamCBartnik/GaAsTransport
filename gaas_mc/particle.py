@@ -10,6 +10,8 @@ from dataclasses import dataclass, fields
 
 import numpy as np
 
+from .backend import to_host
+
 ALIVE, SURFACE, TIMEOUT, BACK, EMITTED, TRAPPED = 0, 1, 2, 3, 4, 5
 STATUS_NAMES = {ALIVE: "alive", SURFACE: "surface", TIMEOUT: "timeout", BACK: "back",
                 EMITTED: "emitted", TRAPPED: "surface_trapped"}
@@ -76,6 +78,15 @@ class Ensemble:
 
     def subset(self, idx):
         return Ensemble(**{f.name: getattr(self, f.name)[idx].copy() for f in fields(self)})
+
+    def to(self, xp):
+        """Copy with every array on the backend of array module xp (numpy: host)."""
+        if xp is np:
+            return self.to_host()
+        return Ensemble(**{f.name: xp.asarray(getattr(self, f.name)) for f in fields(self)})
+
+    def to_host(self):
+        return Ensemble(**{f.name: to_host(getattr(self, f.name)) for f in fields(self)})
 
     def esp(self, mask=None):
         s = self.spin if mask is None else self.spin[mask]

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import numpy as np
 
+from ..backend import asarray, xp_of
 from ..constants import HBAR, Q_E
 from .base import Mechanism, new_k_from_angle
 
@@ -34,7 +35,7 @@ class IonizedImpurity(Mechanism):
         self._Cm = self.N * Q_E**4 * Z**2 / (16 * np.pi * es**2 * np.sqrt(2 * self.m))
 
     def rate(self, E):
-        E = np.asarray(E, dtype=float)
+        E = asarray(E, dtype=float)
         g = self.gamma(E)
         return self._Cw * np.sqrt(g) * (1 + 2 * self.alpha * E) / (1 + 4 * g / self.E_beta)   # Eq. 35
 
@@ -50,8 +51,9 @@ class IonizedImpurity(Mechanism):
         return out
 
     def scatter(self, k, E, rng):
-        E = np.asarray(E, dtype=float)
+        E = asarray(E, dtype=float)
+        xp = xp_of(E)
         r = rng.random(E.size)
         cos_t = 1 - 2 * r / (1 + 4 * self.gamma(E) * (1 - r) / self.E_beta)              # Eq. 36
         k_new = new_k_from_angle(k, E, cos_t, rng, self.m, self.alpha)
-        return k_new, np.ones(E.size, bool), np.full(E.size, self.valley_from)
+        return k_new, xp.ones(E.size, bool), xp.full(E.size, self.valley_from)
