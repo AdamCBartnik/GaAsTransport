@@ -60,11 +60,14 @@ class ModelAssumptions:
     """"local" (default): hole-density-dependent processes use the local mobile-hole population
     p(z) from the global Fermi level and the local valence-band shift (gaas_mc/depletion.py):
     e-h scattering, BAP, and the screening of impurity (and POP) scattering. N_A^- stays at the
-    dopant density. "bulk": the earlier C21-like behaviour (bulk rates everywhere), kept for comparison."""
+    dopant density. "bulk": bulk rates everywhere, as C21 assume for Fig. 18; the C21-compatible
+    baseline used to reproduce C21's published results. Both modes are frozen (no further
+    transport-model changes until the C21 end-to-end benchmark is complete)."""
     depletion_screening_cap: object = "impurity_spacing"
-    """Upper bound on the local screening length, which otherwise diverges as p(z) -> 0:
-    "impurity_spacing" (acceptor Wigner-Seitz radius), "band_bending_width" (W_bb), or a length [m].
-    It is always max'ed with the bulk length, so the bulk is unchanged."""
+    """Upper bound on the local screening length, which otherwise diverges as p(z) -> 0. An
+    approximate finite-impurity-spacing / third-body cutoff, not part of Brooks-Herring.
+    "impurity_spacing" (default; acceptor Wigner-Seitz radius); "band_bending_width" (W_bb) or a
+    length [m] only as sensitivity tests. Always max'ed with the bulk length (bulk unchanged)."""
     depletion_pop_screening: bool = True
     """Use the local hole screening in the screened POP rate (C21 Eq. 25 contains the hole beta)."""
 

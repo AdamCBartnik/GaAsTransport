@@ -39,6 +39,7 @@ class SurfaceArrivals:
     pid: np.ndarray
     time_in_valley: np.ndarray = None   # (n, 3) time spent in Gamma, L, X before arrival [s]
     visited: np.ndarray = None          # (n, 3) bool: valley ever occupied
+    dt_spin: np.ndarray = None          # time since the last real scattering at arrival [s] (Eq. 54)
     eqv: np.ndarray = None              # int8: which equivalent valley (see gaas_mc/valleys.py)
     K: np.ndarray = None                # (n, 3) full crystal wavevector = valley center + k [1/m]
     band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
@@ -82,7 +83,7 @@ class SurfaceArrivals:
                    band=np.zeros(0, np.int8), n_flips=np.zeros(0, np.int32),
                    n_events=np.zeros((0, n_mech), np.int32), pid=np.zeros(0, int),
                    time_in_valley=np.zeros((0, 3)), visited=np.zeros((0, 3), bool),
-                   eqv=np.zeros(0, np.int8), K=np.zeros((0, 3)),
+                   eqv=np.zeros(0, np.int8), K=np.zeros((0, 3)), dt_spin=np.zeros(0),
                    mechanism_names=tuple(names))
 
     @classmethod
@@ -107,3 +108,46 @@ class SurfaceArrivals:
         names = tuple(str(x) for x in d.pop("mechanism_names"))
         d["band_edge_at_surface"] = float(d.get("band_edge_at_surface", 0.0))
         return cls(**d, mechanism_names=names)
+
+
+@dataclass
+class Emissions:
+    """Electrons emitted by a surface model (e.g. surface_c21.C21Surface). Inside-state at the moment
+    of emission plus the vacuum state returned by the surface model."""
+    t: np.ndarray            # emission time [s]
+    E: np.ndarray            # kinetic energy inside, above the valley minimum [J]
+    k: np.ndarray            # (n, 3) inside wavevector from the valley minimum
+    K: np.ndarray            # (n, 3) full crystal wavevector inside
+    valley: np.ndarray
+    eqv: np.ndarray
+    spin: np.ndarray
+    spin0: np.ndarray
+    z0: np.ndarray
+    E0: np.ndarray
+    band: np.ndarray
+    n_surface: np.ndarray    # surface encounters including the emitting one
+    pid: np.ndarray
+    p_vac: np.ndarray        # (n, 3) momentum in vacuum [kg m/s] (p_z < 0: leaving toward -z)
+    E_vac: np.ndarray        # kinetic energy in vacuum above the vacuum level [J]
+
+    def __len__(self):
+        return self.t.size
+
+    @property
+    def E_perp(self):
+        """Transverse (in-plane) kinetic energy in vacuum [J]."""
+        from .constants import M0
+        return (self.p_vac[:, 0] ** 2 + self.p_vac[:, 1] ** 2) / (2 * M0)
+
+    def esp(self):
+        return float(self.spin.mean()) if self.t.size else np.nan
+
+    @classmethod
+    def concatenate(cls, parts):
+        if not parts:
+            z = np.zeros(0)
+            return cls(t=z, E=z, k=np.zeros((0, 3)), K=np.zeros((0, 3)), valley=np.zeros(0, np.int8),
+                       eqv=np.zeros(0, np.int8), spin=np.zeros(0, np.int8), spin0=np.zeros(0, np.int8),
+                       z0=z, E0=z, band=np.zeros(0, np.int8), n_surface=np.zeros(0, np.int32),
+                       pid=np.zeros(0, int), p_vac=np.zeros((0, 3)), E_vac=z)
+        return cls(**{f.name: np.concatenate([getattr(q, f.name) for q in parts]) for f in fields(cls)})

@@ -58,9 +58,9 @@ from .depletion import LocalMechanism
 from .valleys import choose_equivalent_valley, valley_center
 from .constants import EV, FS, HBAR, PS, Q_E
 from .fields import NoField
-from .particle import ALIVE, BACK, SURFACE, TIMEOUT, Ensemble
+from .particle import ALIVE, BACK, EMITTED, SURFACE, TIMEOUT, TRAPPED, Ensemble
 from .spin import flip_probability
-from .surface import SurfaceArrivals
+from .surface import Emissions, SurfaceArrivals
 
 EV_NONE, EV_SURFACE, EV_BACK, EV_REGION, EV_WALL = 0, 1, 2, 3, 4
 
@@ -93,6 +93,7 @@ class Result:
     n_rejected: np.ndarray                   # rejected candidates per mechanism
     flight_mode: str = "self_scattering"
     event_log: dict = field(default_factory=dict)
+    emissions: Emissions = None              # with a surface model (e.g. surface_c21.C21Surface)
 
 
 class Simulation:
@@ -109,6 +110,11 @@ class Simulation:
         self.spin_model = spin_model
         self.field = field if field is not None else NoField()
         self.t_max = float(t_max)
+        # surface: "absorb" | "reflect" | "none" | a surface model with
+        # interact(k, E, valley, K, rng, pid) -> (outcome, info)   (see gaas_mc/surface_c21.py)
+        self.surface_model = surface if getattr(surface, "is_surface_model", False) else None
+        if self.surface_model is not None:
+            surface = "absorb"                      # geometry: stop at z = 0, then ask the model
         if surface not in ("absorb", "reflect", "none"):
             raise ValueError(surface)
         self.surface = surface
@@ -332,6 +338,21 @@ class Simulation:
         remaining = dt.copy()
         elapsed = np.zeros(n)
         zr = self.z_field if 0 < self.z_field < np.inf else None
+        if self.surface_model is not None:
+            # just reflected by the surface model (z = 0, moving inward) while the field pushes back:
+            # if it returns within one substep, do the bounce analytically (constant force F at z = 0):
+            # return time 2 hbar k_z / |F|, k_z -> -k_z (exact by time-reversal symmetry, any dispersion).
+            at = (z <= 0) & (k[:, 2] > 0)
+            if np.any(at):
+                F0 = -Q_E * float(self.field.Ez(np.array([0.0]))[0])
+                if F0 < 0:
+                    t_ret = 2 * HBAR * k[:, 2] / (-F0)
+                    bounce = at & (t_ret <= np.minimum(dt, self.dt_max))
+                    k[bounce, 2] = -k[bounce, 2]
+                    z[bounce] = 0.0
+                    elapsed[bounce] = t_ret[bounce]
+                    remaining[bounce] = 0.0
+                    event[bounce] = EV_SURFACE
         active = remaining > 0
         while np.any(active):
             ia = np.flatnonzero(active)
@@ -378,7 +399,11 @@ class Simulation:
     # ------------------------------------------------------------------------------------
     # Main loop
     # ------------------------------------------------------------------------------------
-    def run(self, ens: Ensemble, rng: np.random.Generator, max_iterations=10_000_000) -> Result:
+    def run(self, ens: Ensemble, rng: np.random.Generator, max_iterations=10_000_000,
+            start_at_surface=False) -> Result:
+        """start_at_surface: electrons at z = 0 with k_z < 0 (e.g. Ensemble.from_arrivals of an
+        earlier run with an absorbing surface) meet the surface model first. The Eq. 54 arrival spin
+        test is not repeated (it was applied when those arrivals were recorded)."""
         ens = ens.copy()
         N = len(ens)
         M = len(self.mechanisms)
@@ -387,6 +412,7 @@ class Simulation:
         n_rej = np.zeros(M, np.int64)
         n_self = 0
         arrivals = []
+        emissions = []
         log = {"mech": [], "E_before": [], "E_after": [], "valley_before": [], "valley_after": []}
 
         snaps = None
@@ -397,6 +423,14 @@ class Simulation:
 
         if np.any(ens.E > self.E_table_max):
             raise ValueError("initial energies exceed the rate-table range; raise E_table_max")
+
+        if start_at_surface:
+            if self.surface_model is None:
+                raise ValueError("start_at_surface needs a surface model")
+            ih = np.flatnonzero((ens.status == ALIVE) & (ens.z <= 0) & (ens.k[:, 2] < 0))
+            arrivals.append(self._arrival_record(ens, ih, n_events))
+            ens.n_surface[ih] += 1
+            self._surface_interaction(ens, ih, rng, emissions)
 
         it = 0
         idx = np.flatnonzero(ens.status == ALIVE)
@@ -428,12 +462,22 @@ class Simulation:
 
             # --- boundary events
             hit = event == EV_SURFACE
+            if self.surface_model is not None:
+                # zero-length stop of an electron just reflected inward (k_z > 0, possible only at
+                # integrator round-off near the analytic-bounce threshold): not an encounter
+                hit &= ens.k[idx, 2] <= 0
             if np.any(hit):
                 ih = idx[hit]
                 if self.spin_flip_at_arrival:
                     self._spin_flip(ens, ih, rng)
-                ens.status[ih] = SURFACE
-                arrivals.append(self._arrival_record(ens, ih, n_events))
+                first = ih[ens.n_surface[ih] == 0]
+                if first.size:
+                    arrivals.append(self._arrival_record(ens, first, n_events))
+                ens.n_surface[ih] += 1
+                if self.surface_model is None:
+                    ens.status[ih] = SURFACE
+                else:
+                    self._surface_interaction(ens, ih, rng, emissions)
             ens.status[idx[event == EV_BACK]] = BACK
             # EV_REGION / EV_WALL: the flight stopped at the field boundary or reflected off the back
             # wall; there is no scattering event, and the next flight follows
@@ -454,7 +498,30 @@ class Simulation:
             log = {}
         return Result(ensemble=ens, arrivals=arr, snapshots=snaps, mechanism_names=self.names,
                       n_iterations=it, n_real=n_real, n_self=n_self, n_rejected=n_rej,
-                      flight_mode=self.flight_mode, event_log=log)
+                      flight_mode=self.flight_mode, event_log=log,
+                      emissions=Emissions.concatenate(emissions) if self.surface_model is not None else None)
+
+    def _surface_interaction(self, ens, ih, rng, emissions):
+        """Ask the surface model what happens to electrons ih at z = 0: emitted, trapped, or reflected
+        back into the semiconductor (specularly, k_z -> -k_z)."""
+        from .surface_c21 import EMIT, REFLECT, TRAP
+        K = ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat)
+        outcome, info = self.surface_model.interact(ens.k[ih], ens.E[ih], ens.valley[ih], K, rng,
+                                                    pid=ens.pid[ih])
+        em = outcome == EMIT
+        if np.any(em):
+            ie = ih[em]
+            emissions.append(Emissions(
+                t=ens.t[ie].copy(), E=ens.E[ie].copy(), k=ens.k[ie].copy(), K=K[em].copy(),
+                valley=ens.valley[ie].copy(), eqv=ens.eqv[ie].copy(), spin=ens.spin[ie].copy(),
+                spin0=ens.spin0[ie].copy(), z0=ens.z0[ie].copy(), E0=ens.E0[ie].copy(),
+                band=ens.band[ie].copy(), n_surface=ens.n_surface[ie].copy(), pid=ens.pid[ie].copy(),
+                p_vac=info["p_vac"][em].copy(), E_vac=info["E_vac_kin"][em].copy()))
+            ens.status[ie] = EMITTED
+        ens.status[ih[outcome == TRAP]] = TRAPPED
+        rf = ih[outcome == REFLECT]
+        ens.k[rf, 2] = np.abs(ens.k[rf, 2])           # back into the semiconductor (+z)
+        ens.z[rf] = 0.0
 
     def _flight_rate(self, E, valley, inside):
         """Rate used to draw the free flight: W_total(E) in the field-free region (direct), or
@@ -584,7 +651,7 @@ class Simulation:
             E0=ens.E0[ih].copy(), band=ens.band[ih].copy(), n_flips=ens.n_flips[ih].copy(),
             n_events=n_events[ih].copy(), pid=ens.pid[ih].copy(),
             time_in_valley=ens.time_in_valley[ih].copy(), visited=ens.visited[ih].copy(),
-            eqv=ens.eqv[ih].copy(),
+            eqv=ens.eqv[ih].copy(), dt_spin=ens.dt_spin[ih].copy(),
             K=ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat),
             band_edge_at_surface=float(self.field.band_edge(np.array([0.0]))[0]),
             mechanism_names=self.names)

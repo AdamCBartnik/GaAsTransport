@@ -19,13 +19,15 @@ population, and with it every hole-density-dependent process (user decision of 2
      (beta ~ sqrt(p)) in the nondegenerate limit. The same local beta enters the e-h rate
      (Eqs. 38-42) and, by default, the screened POP rate (Eq. 25), which C21 writes with the same
      hole beta.
-  5. Screening cap (ambiguity, see docs/MODEL_ASSUMPTIONS.md): as p(z) -> 0 the screening length
-     diverges, and so does the Brooks-Herring rate (it goes as 1/beta^2 at fixed energy).
-     Brooks-Herring is meaningless once the screening length exceeds the distance between
-     ions (the Conwell-Weisskopf argument), so the local length is capped:
-         L(z) = min(1/beta(z), L_cap),   L_cap = max(L_bulk, a)
+  5. Screening cap (docs/MODEL_ASSUMPTIONS.md 6b): as p(z) -> 0 the screening length diverges, and
+     so does the Brooks-Herring rate (it goes as 1/beta^2 at fixed energy). The local length is capped
+         L(z) = min(1/beta(z), L_cap),   L_cap = max(L_bulk, a).
+     This is NOT part of Brooks-Herring: it is an approximate finite-impurity-spacing / third-body
+     cutoff (Conwell-Weisskopf idea: beyond the ion spacing the neighbouring ions, not mobile holes,
+     cut off the potential), used because the BH screened-Coulomb picture becomes questionable as the
+     mobile-hole density tends to zero.
      a = "impurity_spacing" (default): the acceptor Wigner-Seitz radius (3/(4 pi N_A))^(1/3);
-         "band_bending_width": W_bb;  or an explicit length [m].
+         "band_bending_width" (W_bb) or an explicit length [m]: sensitivity tests only.
      Taking the max with L_bulk keeps the bulk exactly unchanged.
   6. Phonon (acoustic, POP coupling) and intervalley parameters are unchanged.
   Minority electrons (n ~ n_i^2/p) and photoexcited carriers contribute nothing to screening.

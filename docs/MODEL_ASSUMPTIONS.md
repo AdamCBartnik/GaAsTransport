@@ -218,7 +218,7 @@ unchanged; only the mobile-hole population changes (`gaas_mc/depletion.py`).
 | Electron–hole scattering | Uses the local gas everywhere: density, Fermi–Dirac occupation of the sampled hole, and Pauli blocking of the final state. |
 | BAP | Uses local p, local E_F^h (Eq. 44 with p(z)), and the C21 degeneracy criterion evaluated with the local E_F − E_V(z). The jump in τ_BAP where that criterion switches (Eqs. 50/51 ↔ 47) is C21's own discontinuity (ambiguity A11). |
 | Ionized impurities | N_A⁻ stays at the dopant density. The screening is recomputed from the local mobile carriers: β(z) = β_bulk·√(χ(z)/χ_bulk), with χ = ∂p/∂μ = Σ_b N_b F_{−1/2}(η)/kT. This equals the C21 bulk β (Eq. 28 or 29) at φ = 0 and becomes Debye-like ∝ √p when nondegenerate. |
-| Screening cap (**decision needed**) | As p → 0 the screening length, and with it the Brooks–Herring rate, diverge, and BH stops being meaningful once the screening length exceeds the ion spacing (Conwell–Weisskopf). The local length is therefore capped at L_cap = max(L_bulk, a). The default is a = acceptor Wigner–Seitz radius (3/4πN_A)^⅓: 2.9 nm at 1e19 (< L_bulk = 4.7 nm, **so at 1e19 the screening does not weaken at all**) and 7.8 nm at 5e17 (L_bulk 6.1 nm). Alternative: a = W_bb (9.9 nm / 42 nm), or any length. Both are run in the comparison. |
+| Screening cap (user decision of 2026-10-06; frozen) | As p → 0 the screening length, and with it the Brooks–Herring rate, diverge. The local length is capped at L_cap = max(L_bulk, a). **This cap is not part of Brooks–Herring.** It is an approximate finite-impurity-spacing / third-body cutoff, used because the BH screened-Coulomb model (one ion screened by a mobile-carrier cloud) becomes questionable as the mobile-hole density tends to zero; beyond the ion spacing the potential is cut off by the neighbouring ions (the Conwell–Weisskopf idea), not by mobile holes. Default: a = acceptor Wigner–Seitz radius (3/4πN_A)^⅓, 2.9 nm at 1e19 (< L_bulk = 4.7 nm, **so at 1e19 the screening does not weaken at all**) and 7.8 nm at 5e17 (L_bulk 6.1 nm). `"band_bending_width"` (a = W_bb: 9.9 nm / 42 nm) is kept **only as a sensitivity test**, as is an explicit length. Not refined further. |
 | POP | C21 Eq. 25 is screened by the same hole β, so the local β is used by default (`depletion_pop_screening=True`). The phonon coupling itself is unchanged. |
 | Unchanged | Acoustic and intervalley parameters, band gap, and E_g(p) narrowing (bulk values), and the potential. Minority electrons (≈ n_i²/p) are neglected in screening. |
 | Numerics | φ grid from φ(0) to 0 with spacing ≤ kT/4 (109 points at 1e19). Each density-dependent mechanism holds one variant per grid point. Rates are interpolated linearly in φ, and the variant for an event is drawn with probability w·W₁/[(1−w)W₀ + w·W₁], which is exact for the interpolated rate. The null-collision bound covers every φ. Spin-relaxation tables are (φ, E). |
@@ -242,6 +242,26 @@ cubic axes, with z = [001] the surface normal. The equivalent valley is chosen o
 transfer consistently with the multiplicities: uniformly among the destination type's valleys, or
 among the *other* valleys for L→L and X→X (`gaas_mc/valleys.py`). L arrivals are **not** mapped onto
 a scalar-mass Γ model; the surface stage will be valley-aware.
+
+## 6d. Surface emission: the C21 model (Stage E, `gaas_mc/surface_c21.py`)
+
+An optional module. Transport only calls `surface.interact(k, E, valley, K, rng)` when an electron
+reaches z = 0 (`Simulation(..., surface=C21Surface(chi, material))`), so another surface model with the
+same interface can replace it. The bulk Monte Carlo is unchanged.
+
+| Item | Choice |
+|---|---|
+| Vacuum level | E_vac = E_C,Γ(z=0) + χ. χ is the fitting parameter; χ_eff = χ − E_bb (C21 Fig. 15(c)). |
+| Barrier | Vacuum side: V(x) = E_vac + E_b(1 − x/L_b) for 0 < x < L_b, then E_vac. L_b = 0.15 nm, E_b = 4 eV (C21 Sec. III C 2). Overridable `barrier(x)`. |
+| Transmission | Propagation (transfer) matrix: 200 constant slices, BenDaniel–Duke matching (ψ and ψ′/m continuous), m* → m0 at the interface. Inside, the normal wavevector is the electron's k_z with the velocity mass m*(1+2αE), so the incident flux equals the group velocity; T = (k_out/m0)/(k_z/m_v)·\|t\|². Tested against the analytic rectangular barrier and the mass step (flux conservation). C21 do not state the nonparabolic matching; this is our reading. Option `matching_mass="band_edge"` uses the band-edge m* instead (the literal reading of C21's "the electron mass changes from m*_e to m0"); it gives a lower T. Both are run in the Fig. 18 benchmark. |
+| Energy | E_tot = valley offset + E_kin, relative to the Γ edge at z = 0. |
+| (100) restriction | K∥ (valley centre + k, lab z = [001]) is folded into the (001) surface Brillouin zone (b1, b2 = (2π/a)(1, ±1)) and conserved. The vacuum normal energy is ε = E_tot − χ − ħ²K∥²/2m0, and emission needs ε > 0. Folded valley-centre K∥ costs 2.35 eV (all L) and 4.7 eV (X[100], X[010]), so only Γ and X[001] emit at the energies reached here: C21's "Γ and some X valleys". The restriction is energetic, not a hard rule. |
+| Trapping | E_tot < E_vac: trapped and removed (C21 Sec. IV). An electron above E_vac with ε ≤ 0 (too much transverse energy) is reflected, not trapped. |
+| Otherwise | Emitted with probability T, else specularly reflected (k_z → −k_z) back into the GaAs and transported again. |
+| Bounce | A reflected electron at z = 0 is pushed back by the surface field. If it returns within one Verlet substep, the bounce is done analytically: t_ret = 2ħk_z/\|F(0)\|, k_z → −k_z (exact for a constant force by time reversal). |
+| Records | `Result.emissions`: inside state at emission (t, E, k, K, valley, eqv, spin, spin0, z0, E0, band), surface-encounter count, vacuum momentum p_vac and E_vac. Statuses EMITTED and TRAPPED. `Result.arrivals` keeps the first arrival of each electron. |
+| Spin | Unchanged at the surface. `spin_flip_at_arrival` (default False, as C21) applies Eq. 54 for the time since the last test at every encounter. |
+| χ branching | The history up to the first surface encounter does not depend on χ, so `Ensemble.from_arrivals()` + `run(..., start_at_surface=True)` continues one first-arrival ensemble with each χ. |
 
 ## 6. Other
 

@@ -5,7 +5,8 @@ S. Karkare *et al.*, J. Appl. Phys. **113**, 104904 (2013) and its 2015 erratum 
 
 The main output is the **surface-arrival ensemble**: the time, energy, k, valley, spin, initial depth,
 scattering history, and valley residence times of each electron when it first reaches z = 0. No emission
-physics is applied, so these records can be handed to a separate surface/interface model.
+physics is applied, so these records can be handed to a separate surface/interface model. The C21
+surface model (Stage E) is available as an optional, replaceable module for benchmarking.
 
 * `docs/IMPLEMENTATION_PLAN.md`: plan, parameter table, mechanism table, original list of ambiguities
 * `docs/MODEL_ASSUMPTIONS.md`: **every modelling choice, its default, alternatives, and validation evidence**
@@ -23,7 +24,7 @@ physics is applied, so these records can be handed to a separate surface/interfa
 | C | L, X valleys; intervalley (Eq. 33, DOS factor in numerator); spin frozen in L/X with residence-time bookkeeping | done, validated |
 | D | C21 band bending (Eqs. 56–62); user potentials; hybrid direct / null-collision flights; adaptive Verlet step | done, validated |
 | D′ | Depletion region: local mobile holes (global E_F), local screening of impurity/POP/e–h, local BAP; valley identity + full crystal momentum at arrival | done, validated |
-| E | optional C21 surface barrier, for benchmarking only | todo |
+| E | optional C21 surface model (`surface_c21.py`): triangular barrier, transfer matrix, m*→m0, (001) K∥ conservation, trapping, reflection; Fig. 18 benchmark | done, benchmark in `docs/VALIDATION.md` |
 
 ## Running
 
@@ -41,6 +42,8 @@ PYTHONPATH=. python validation/fig14_spin_relaxation_time.py <N> <p_cm3> <pauli>
 PYTHONPATH=. python validation/stage_d_band_bending.py fast   # C21 Figs. 16, 17 + integrator accuracy
 PYTHONPATH=. python validation/stage_d_band_bending.py run <p> <hv> <N>; ... plot   # C21 Fig. 20
 PYTHONPATH=. python validation/depletion.py profiles | inject | compare   # depletion-region diagnostics
+python tools/extract_c21_fig18.py                      # C21 Fig. 18 curves from the PDF's vector graphics
+PYTHONPATH=. python validation/stage_e_fig18.py run bulk|local [N] [workers]; ... report bulk local   # C21 Fig. 18
 PYTHONPATH=. python examples/surface_arrivals.py [N] [p_cm3] [hv_eV]
 ```
 
