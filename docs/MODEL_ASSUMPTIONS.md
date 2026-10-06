@@ -38,29 +38,78 @@ E_g + Δ_so.
 
 | Value | Meaning |
 |---|---|
-| **`"adachi1989"`** (default) | Adachi model dielectric function, JAP 66, 6030 (1989), for intrinsic GaAs (`optics.Adachi1989GaAs`). |
-| any object with `absorption_coefficient(hv)` | e.g. `optics.TabulatedAbsorption(hv, alpha)` for measured α(hν), or `ConstantAbsorptionLength(l)` |
+| **`"casey1975+adachi1989"`** (default) | `optics.CaseyAdachiAbsorption(p)`: the measured p-type near-edge absorption of Casey, Sell & Wecht, J. Appl. Phys. **46**, 250 (1975), interpolated in hν and in log10 p, blended into Adachi (1989) above the edge. |
+| `"casey1975"` | Casey data only (1.31–1.59 eV). |
+| `"adachi1989"` | Adachi model dielectric function alone (comparison). It refuses hν < 1.42 eV. |
+| any object with `absorption_coefficient(hv)` | e.g. `optics.TabulatedAbsorption(hv, alpha)` for other measured α(hν), or `ConstantAbsorptionLength(l)` |
 
-* **Interface.** `absorption_coefficient(hv)` takes hν in J and returns α in 1/m. The depth distribution
-  is Eq. 7 with l = 1/α. `reflectivity(hv)` is provided for later QE normalization.
-* **Parameters.** These are the Adachi (1989) GaAs values as transcribed in the public-domain (CC0)
-  refractiveindex.info script by M. Polyanskiy. That transcription records three gaps in the paper,
-  which are reproduced here: the E1+Δ1 term is omitted (no B2, B21 given), negative ε2 is clipped,
-  and the phonon energy in the indirect term is set to zero.
-  **TODO:** verify each value against Adachi (1989) Table I. The PDF is not yet in `refs/`.
-* **Cross-check.** The model reproduces the refractiveindex.info tabulated n, k to their 4-digit
-  rounding (`tests/test_optics.py`). Solcore is not a dependency; its Adachi implementation hard-codes
-  modified parameters (b1 = 7, Γ = 0.06, E0 + 5 meV), so it is at best a loose cross-check.
-* **Band-gap narrowing is not applied** to the optical data (user decision 2; C21 does not
-  prescribe shifting the spectrum).
-* **Sub-E0 artifact (open issue).** The Adachi E0 term has no broadening or Urbach tail, but the E2
-  damped-oscillator term has a Lorentzian tail that gives absorption at all photon energies:
-  1.2e3 cm⁻¹ at 1.0 eV, 2.5e3 cm⁻¹ at 1.40 eV, and about +2e3 cm⁻¹ added above E0 (≈25% of α at
-  1.45 eV, ≈7% at 1.9 eV). The model is kept exactly as published. `photoexcite` refuses
-  hν < E0 = 1.42 eV for this model unless `allow_optics_extrapolation=True`; this also covers the
-  window E_g(p) < hν < 1.42 eV at high doping. **Decision needed:** accept the near-edge
-  contribution, or substitute tabulated near-edge data via `TabulatedAbsorption`.
-* **Differs from C21 Fig. 3.** C21 fitted Adachi's model to Zollner (2001) data with unpublished parameters.
+**Interface.** `absorption_coefficient(hv)` takes hν in J and returns α in 1/m. The depth
+distribution is Eq. 7 with l = 1/α. A model raises `ValueError` where it is not valid, rather than
+returning a number. `reflectivity(hv)` (from Adachi) is provided for later QE normalization.
+
+**Default composite (user decision of 2026-10-05).**
+* **1.31–1.55 eV:** Casey p-type data. The spectra are measured at p = 1.6e16, 2.2e17, 4.9e17, 1.2e18,
+  2.4e18 and 1.6e19 cm⁻³ (297 K). α(hν; p) = exp[(1−w) ln α_lo + w ln α_hi], where
+  w = (log10 p − log10 p_lo)/(log10 p_hi − log10 p_lo), between the two bracketing spectra. Each
+  spectrum is interpolated log-linearly in hν.
+* **Outside the measured doping range,** the nearest spectrum is used and a warning is issued
+  (`out_of_range="raise"` is available). There is no extrapolation in p.
+* **1.55 eV to the end of the Casey data (1.592 eV):** ln α is blended with the smoothstep weight
+  s = 3x² − 2x³. The window ends at 1.592 eV rather than 1.65 eV because both curves must exist
+  inside it. Above the window the model is Adachi (1989).
+* **Seam mismatch α_Adachi/α_Casey at 1.55 / 1.592 eV:**
+
+  | p (cm⁻³) | at 1.55 eV | at 1.592 eV |
+  |---|---|---|
+  | 1.5e17 | 1.17 | 1.17 |
+  | 1e18 | 1.18 | 1.15 |
+  | 1e19 | 1.37 | 1.25 |
+
+  Heavy doping flattens the measured spectrum below the intrinsic value, so the blend slope is
+  visible at 1e19. The paper states ±15% for α > 1e3 cm⁻¹ (Kramers–Kronig part).
+* **Doping-induced edge.** The measured spectra contain the real doping-induced shift and broadening
+  of the edge, so the window E_g(p) < hν < E_g(intrinsic) is absorbed (e.g. l ≈ 7.8 μm at 1.40 eV
+  for 1e19). No 1.42 eV optical cutoff is imposed. C21's band-gap narrowing (Eq. 10) is applied
+  only to the electronic structure, not to the optical data.
+* **Below the data.** Under the lowest digitized point of a spectrum (α ≈ 13 cm⁻¹, the floor of the
+  figures), the model raises. Such photons would have l > 0.7 mm anyway.
+* **Excitation rule.** `photoexcite` requires (1) the band-transition energetics, hν > E_g(p), and
+  (2) a finite α > 0 from the model.
+
+**Casey data: digitization and provenance** (`tools/digitize_casey1975.py`,
+`tools/casey1975_digitization.json`, `gaas_mc/data/casey1975_ptype.csv`)
+* **Source.** The paper gives α(hν) only as figures (Figs. 6–8, log scale 10–1e5 cm⁻¹, 1.30–1.60 eV).
+  No machine-readable table or trustworthy digitization was found, so the curves were digitized from
+  the page scans in the publisher PDF (`refs/Casey1975_JAP46_250.pdf`, not committed).
+* **Calibration.** Each figure's grid lines are located and fitted. A piecewise map, exact on every
+  grid line, absorbs scan skew and drawing nonuniformity; an affine fit would leave residuals of
+  ≤1.7 meV and ≤0.018 dex.
+* **Extraction.** Sweeps along lines of constant α or constant E find dark-run crossings, and the
+  configured curve order assigns them. A sweep is used only if exactly the expected number of
+  crossings remains after removing grid lines and over-wide runs (labels, arrows).
+* **Cleaning.** Two outlier filters run afterwards: a neighbour line in pixel space, and a robust
+  Theil–Sen local fit (> 6% deviation). Curves that coincide within the line width are recorded as
+  merged crossings.
+* **Assembly** (`gaas_mc/optical_data.py`). Figures are averaged in ln α on a 1 meV grid. Merged
+  crossings are used only where no figure resolves the curve, and gaps (curve crossings, labels) are
+  bridged log-linearly and flagged.
+* **Checks.**
+  * The overlays `tools/out/casey1975_fig*_overlay.png` are regenerated by the script.
+  * Cross-figure agreement: 1.2e18 (Figs. 7, 8) and 2.2e17 (Figs. 6–8) coincide.
+  * The paper's own statements are reproduced: α below the gap increases with p; α ≈ 1e2 cm⁻¹ near
+    1.35 eV for 1.6e19; all p-type spectra converge near 1.6 eV.
+  * The digitization is bit-for-bit reproducible from the PDF (test).
+* **Uncertainty.** About ±1.5 meV in hν and about ±2.5% in α from digitization, on top of the paper's ±15%.
+* **Not used.** Solcore is not a dependency. Its Adachi implementation hard-codes modified
+  parameters, so it is at most a loose cross-check.
+
+**Adachi (1989).** All 14 GaAs parameters were verified against Table I
+(`refs/Adachi1989_JAP66_6030.pdf`). The model reproduces the public-domain refractiveindex.info
+tabulation to its 4-digit rounding. The E2 damped-oscillator term has a Lorentzian tail that gives
+α > 0 at all energies (1.2e3 cm⁻¹ at 1.0 eV, 2.5e3 cm⁻¹ at 1.40 eV). This tail is **not** interband
+absorption, so `Adachi1989GaAs` raises below E0 = 1.42 eV unless constructed with
+`below_E0="model"`. Above E0 the tail still adds about 25% to α at 1.45 eV, which is why measured
+data are used near the edge.
 
 ## 3. Holes and electron–hole scattering
 

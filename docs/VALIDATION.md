@@ -13,6 +13,15 @@ scripts are in `validation/` and the figures go to `validation/out/`.
 | Initial ESP (Eq. 12), intrinsic | 50% at edge, 45.8% at 1.74 eV, 26% at 1.8 eV, 8.3% at 2.2 eV | 50% → ≈47% → steep drop (Fig. 6) |
 | Initial ESP, Monte Carlo vs Eq. 12 | max deviation 2.8 standard errors over ~140 points (4 dopings, 2 spin rules) | — |
 
+## Absorption (`validation/absorption.py`)
+
+| Check | Result |
+|---|---|
+| Adachi (1989) parameters | all 14 GaAs values match Table I; n, k match the CC0 refractiveindex.info tabulation to 4 digits |
+| Casey (1975) digitization | 6 p-type spectra (1.6e16–1.6e19 cm⁻³, 1.31–1.592 eV) from Figs. 6–8; cross-figure agreement for 1.2e18 and 2.2e17; the paper's stated trends are reproduced; bit-for-bit reproducible from the PDF |
+| Composite seam α_Adachi/α_Casey (1.55 eV) | 1.17 (1.5e17), 1.18 (1e18), 1.37 (1e19); continuous, smooth blend |
+| Absorption length at 1.45 eV | 1.59 / 1.51 / 2.11 μm (1.5e17 / 1e18 / 1e19) vs 1.18 μm for Adachi alone |
+
 ## Rates (Figs. 7, 8, 10–13): agree by eye at both dopings
 
 * **Acoustic, POP abs/em, and impurity rates and τ_m.** Within plotting accuracy. Examples: impurity
@@ -64,7 +73,7 @@ this comparison.
 
 ## Example: surface arrivals without band bending
 
-`examples/surface_arrivals.py`, p = 1e19, hν = 1.60 eV (Adachi l = 616 nm), 3000 electrons, 370 ps:
+`examples/surface_arrivals.py`, p = 1e19, hν = 1.60 eV (Adachi l = 616 nm, before the Casey default was adopted), 3000 electrons, 370 ps:
 * **ESP:** 0.479 at excitation, 0.283 at arrival.
 * **Arrival:** 55% of electrons reach z = 0; the median arrival time is 41 ps.
 * **Upper valleys:** 7% of arrivals ever visited L (none visited X), spending 0.6% of their time there,

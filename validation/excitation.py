@@ -4,7 +4,8 @@
    for the default per-band rule (and the prose compatibility rule), overlaid on Eq. 12. Checks
    ~50% at threshold and the drop at Eg + Delta_so.
 2. Fig. 5: initial energy histograms (10 meV bins) for both spin rules.
-3. Fig. 3: absorption length and reflectivity from the Adachi (1989) model (intrinsic GaAs).
+(The absorption model is validated separately in validation/absorption.py; the ESP and energy
+distributions do not depend on it, so a constant absorption length is used here.)
 
 Run: PYTHONPATH=. python validation/excitation.py
 """
@@ -17,7 +18,9 @@ from gaas_mc import diagnostics as dg
 from gaas_mc.constants import ev, per_cm3, to_ev
 from gaas_mc.excitation import BAND_NAMES, esp0, photoexcite
 from gaas_mc.material import Sample, gaas_chubenko2021
-from gaas_mc.optics import Adachi1989GaAs
+from gaas_mc.optics import ConstantAbsorptionLength
+
+ABS = ConstantAbsorptionLength(1e-6)
 
 OUT = Path(__file__).parent / "out"
 OUT.mkdir(exist_ok=True)
@@ -40,7 +43,7 @@ def fig6(rng):
         for rule, mk in (("per_band", "o"), ("chubenko_prose", "x")):
             y, e = [], []
             for h in pts:
-                ens = photoexcite(s, ev(h), N_MC, rng, spin_rule=rule)
+                ens = photoexcite(s, ev(h), N_MC, rng, absorption=ABS, spin_rule=rule)
                 y.append(100 * ens.esp())
                 e.append(100 * np.sqrt(max(1 - ens.esp() ** 2, 1e-12) / N_MC))
                 worst = max(worst, abs(ens.esp() - esp0(s, ev(h))) / max(e[-1] / 100, 1e-9))
@@ -59,7 +62,7 @@ def fig5(p, rule, rng):
     s = Sample(MAT, per_cm3(p))
     fig, axs = plt.subplots(2, 2, figsize=(9, 6.5))
     for ax, hw in zip(axs.flat, (1.45, 1.60, 1.75, 1.90)):
-        ens = photoexcite(s, ev(hw), 100_000, rng, spin_rule=rule)
+        ens = photoexcite(s, ev(hw), 100_000, rng, absorption=ABS, spin_rule=rule)
         bins = np.arange(0, 1.0 + 1e-9, 0.010)
         data = [to_ev(ens.E[ens.band == b]) for b in range(3)]
         ax.hist(data, bins=bins, stacked=True, color=dg.SLOTS[:3], label=list(BAND_NAMES),
@@ -72,28 +75,8 @@ def fig5(p, rule, rng):
     dg.save(fig, OUT / f"fig5_E0_p{p:.0e}_{rule}.png")
 
 
-def fig3():
-    m = Adachi1989GaAs()
-    hv = np.linspace(1.425, 6.0, 2000)
-    a = m.absorption_coefficient(ev(hv))
-    fig, axs = plt.subplots(1, 2, figsize=(11, 4))
-    axs[0].semilogy(hv, 1e9 / a, color=dg.SLOTS[0], lw=2)
-    axs[0].set_xlabel("hw, eV"); axs[0].set_ylabel("absorption length l, nm")
-    axs[0].set_title("Adachi (1989), intrinsic GaAs (cf. C21 Fig. 3, blue)", fontsize=9)
-    axs[1].plot(hv, m.reflectivity(ev(hv)), color=dg.SLOTS[1], lw=2)
-    axs[1].set_xlabel("hw, eV"); axs[1].set_ylabel("R")
-    axs[1].set_title("Normal-incidence reflectivity (cf. C21 Fig. 3, red)", fontsize=9)
-    for ax in axs:
-        ax.grid(True, color="#e4e3dd", lw=0.6)
-    dg.save(fig, OUT / "fig3_adachi_absorption.png")
-    for h in (1.45, 1.60, 1.75, 1.90, 2.2):
-        print(f"Adachi 1989: hw = {h:.2f} eV  l = {1e9 / m.absorption_coefficient(ev(h)):7.1f} nm  "
-              f"R = {m.reflectivity(ev(h)):.3f}")
-
-
 if __name__ == "__main__":
     rng = np.random.default_rng(2021)
-    fig3()
     fig6(rng)
     for p in (1e10, 1e19):
         for rule in ("per_band", "chubenko_prose"):

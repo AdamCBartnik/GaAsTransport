@@ -1,0 +1,654 @@
+{
+ "source": "H. C. Casey, Jr., D. D. Sell, K. W. Wecht, J. Appl. Phys. 46, 250 (1975), doi:10.1063/1.321330",
+ "notes": "Room temperature (297 K). Pixel coordinates refer to the embedded page scan, cropped by 'crop' = (left, top, right, bottom). Grid-line guesses are refined automatically by tools/digitize_lib.calibrate.",
+ "figures": {
+  "fig8": {
+   "pdf": "refs/Casey1975_JAP46_250.pdf",
+   "page": 6,
+   "crop": [
+    250,
+    200,
+    1300,
+    1300
+   ],
+   "vlines": [
+    [
+     1.3,
+     88
+    ],
+    [
+     1.4,
+     382
+    ],
+    [
+     1.5,
+     672
+    ],
+    [
+     1.6,
+     972
+    ]
+   ],
+   "hlines": [
+    [
+     5,
+     40
+    ],
+    [
+     4,
+     200
+    ],
+    [
+     3,
+     359
+    ],
+    [
+     2,
+     517.5
+    ],
+    [
+     1,
+     679
+    ]
+   ],
+   "curves": {
+    "p1.6e19": {
+     "carrier": "p",
+     "conc_cm3": 1.6e+19
+    },
+    "p2.4e18": {
+     "carrier": "p",
+     "conc_cm3": 2.4e+18
+    },
+    "p1.2e18": {
+     "carrier": "p",
+     "conc_cm3": 1.2e+18
+    },
+    "p4.9e17": {
+     "carrier": "p",
+     "conc_cm3": 4.9e+17
+    },
+    "p2.2e17": {
+     "carrier": "p",
+     "conc_cm3": 2.2e+17
+    },
+    "p1.6e16": {
+     "carrier": "p",
+     "conc_cm3": 1.6e+16
+    },
+    "hp": {
+     "carrier": "high_purity",
+     "conc_cm3": 0.0
+    }
+   },
+   "segments": [
+    {
+     "id": "8A tails",
+     "kind": "col",
+     "levels": [
+      1.3035,
+      1.335,
+      22
+     ],
+     "window": [
+      13,
+      60
+     ],
+     "assign": [
+      "p4.9e17",
+      "p1.2e18",
+      "p2.4e18"
+     ]
+    },
+    {
+     "id": "8B 1.6e19 tail",
+     "kind": "col",
+     "levels": [
+      1.3035,
+      1.362,
+      40
+     ],
+     "window": [
+      80,
+      400
+     ],
+     "assign": [
+      "p1.6e19"
+     ],
+     "max_width": 9
+    },
+    {
+     "id": "8C1 low rows",
+     "kind": "row",
+     "levels": [
+      13.5,
+      18,
+      8
+     ],
+     "window": [
+      1.35,
+      1.398
+     ],
+     "assign": [
+      "p2.2e17",
+      "p1.6e16"
+     ]
+    },
+    {
+     "id": "8C2 bundle rows",
+     "kind": "row",
+     "levels": [
+      30,
+      95,
+      25
+     ],
+     "window": [
+      1.345,
+      1.398
+     ],
+     "assign": [
+      "p2.4e18",
+      "p1.2e18",
+      "p4.9e17",
+      "p2.2e17",
+      "p1.6e16"
+     ]
+    },
+    {
+     "id": "8C2b bundle rows",
+     "kind": "row",
+     "levels": [
+      97,
+      148,
+      12
+     ],
+     "window": [
+      1.362,
+      1.4
+     ],
+     "assign": [
+      "p2.4e18",
+      "p1.2e18",
+      "p4.9e17",
+      "p2.2e17",
+      "p1.6e16"
+     ]
+    },
+    {
+     "id": "8C3 bundle rows",
+     "kind": "row",
+     "levels": [
+      150,
+      900,
+      30
+     ],
+     "window": [
+      1.356,
+      1.415
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18",
+      "p1.2e18",
+      "p4.9e17",
+      "p2.2e17",
+      "p1.6e16"
+     ]
+    },
+    {
+     "id": "8D1 cols above 1e3",
+     "kind": "col",
+     "levels": [
+      1.4225,
+      1.4975,
+      31
+     ],
+     "window": [
+      2000,
+      25000
+     ],
+     "exclude_levels": [
+      [
+       1.4685,
+       1.4725
+      ]
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18",
+      "p1.2e18",
+      "hp"
+     ],
+     "always_drop_grid": true
+    },
+    {
+     "id": "8D2 cols high E",
+     "kind": "col",
+     "levels": [
+      1.5025,
+      1.5975,
+      39
+     ],
+     "window": [
+      6000,
+      25000
+     ],
+     "exclude_levels": [
+      [
+       1.507,
+       1.523
+      ]
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18",
+      "p1.2e18"
+     ],
+     "always_drop_grid": true
+    },
+    {
+     "id": "8D3 cols merged band",
+     "kind": "col",
+     "levels": [
+      1.5575,
+      1.5975,
+      17
+     ],
+     "window": [
+      10500,
+      25000
+     ],
+     "always_drop_grid": true,
+     "max_width": 14,
+     "assign": [
+      "p1.6e19",
+      "p2.4e18+p1.2e18"
+     ]
+    },
+    {
+     "id": "8E1 rows 1.6e19/2.4e18/1.2e18",
+     "kind": "row",
+     "levels": [
+      420,
+      700,
+      8
+     ],
+     "window": [
+      1.377,
+      1.3975
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18",
+      "p1.2e18"
+     ]
+    },
+    {
+     "id": "8E2a rows above leader",
+     "kind": "row",
+     "levels": [
+      1050,
+      1250,
+      5
+     ],
+     "window": [
+      1.393,
+      1.404
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18"
+     ]
+    },
+    {
+     "id": "8E2b rows above leader",
+     "kind": "row",
+     "levels": [
+      1300,
+      1700,
+      6
+     ],
+     "window": [
+      1.395,
+      1.4065
+     ],
+     "assign": [
+      "p1.6e19",
+      "p2.4e18"
+     ]
+    },
+    {
+     "id": "8D0 cols knee",
+     "kind": "col",
+     "levels": [
+      1.4235,
+      1.4385,
+      16
+     ],
+     "window": [
+      1500,
+      7000
+     ],
+     "always_drop_grid": true,
+     "assign": [
+      "p1.6e19",
+      "p2.4e18",
+      "p1.2e18"
+     ]
+    }
+   ]
+  },
+  "fig7": {
+   "pdf": "refs/Casey1975_JAP46_250.pdf",
+   "page": 5,
+   "crop": [
+    1250,
+    2200,
+    2539,
+    3250
+   ],
+   "vlines": [
+    [
+     1.3,
+     149
+    ],
+    [
+     1.4,
+     445.5
+    ],
+    [
+     1.5,
+     733.5
+    ],
+    [
+     1.6,
+     1034
+    ]
+   ],
+   "hlines": [
+    [
+     5,
+     104.5
+    ],
+    [
+     4,
+     266.5
+    ],
+    [
+     3,
+     426.5
+    ],
+    [
+     2,
+     585.5
+    ],
+    [
+     1,
+     742.5
+    ]
+   ],
+   "curves": {
+    "p1.2e18": {
+     "carrier": "p",
+     "conc_cm3": 1.2e+18
+    },
+    "p4.9e17": {
+     "carrier": "p",
+     "conc_cm3": 4.9e+17
+    },
+    "p2.2e17": {
+     "carrier": "p",
+     "conc_cm3": 2.2e+17
+    }
+   },
+   "segments": [
+    {
+     "id": "7A1 bundle rows",
+     "kind": "row",
+     "levels": [
+      60,
+      290,
+      20
+     ],
+     "window": [
+      1.352,
+      1.398
+     ],
+     "assign": [
+      "p1.2e18",
+      "p4.9e17",
+      "p2.2e17"
+     ]
+    },
+    {
+     "id": "7A2 bundle rows",
+     "kind": "row",
+     "levels": [
+      300,
+      950,
+      20
+     ],
+     "window": [
+      1.38,
+      1.4015
+     ],
+     "assign": [
+      "p1.2e18",
+      "p4.9e17+p2.2e17"
+     ]
+    },
+    {
+     "id": "7B steep rows",
+     "kind": "row",
+     "levels": [
+      1050,
+      3200,
+      25
+     ],
+     "window": [
+      1.4015,
+      1.43
+     ],
+     "assign": [
+      "p1.2e18",
+      "p4.9e17+p2.2e17"
+     ]
+    },
+    {
+     "id": "7C1 loop cols",
+     "kind": "col",
+     "levels": [
+      1.4235,
+      1.4335,
+      11
+     ],
+     "window": [
+      3000,
+      9000
+     ],
+     "always_drop_grid": true,
+     "assign": [
+      "p2.2e17",
+      "p4.9e17+p1.2e18"
+     ]
+    },
+    {
+     "id": "7C2 loop cols",
+     "kind": "col",
+     "levels": [
+      1.4365,
+      1.4485,
+      13
+     ],
+     "window": [
+      3000,
+      9000
+     ],
+     "always_drop_grid": true,
+     "assign": [
+      "p2.2e17",
+      "p4.9e17",
+      "p1.2e18"
+     ]
+    },
+    {
+     "id": "7D merged cols",
+     "kind": "col",
+     "levels": [
+      1.4525,
+      1.5975,
+      59
+     ],
+     "window": [
+      5000,
+      25000
+     ],
+     "always_drop_grid": true,
+     "max_width": 14,
+     "assign": [
+      "p2.2e17+p4.9e17+p1.2e18"
+     ]
+    }
+   ]
+  },
+  "fig6": {
+   "pdf": "refs/Casey1975_JAP46_250.pdf",
+   "page": 5,
+   "crop": [
+    0,
+    0,
+    1300,
+    950
+   ],
+   "vlines": [
+    [
+     1.3,
+     323.5
+    ],
+    [
+     1.4,
+     617
+    ],
+    [
+     1.5,
+     906
+    ],
+    [
+     1.6,
+     1207
+    ]
+   ],
+   "hlines": [
+    [
+     5,
+     226
+    ],
+    [
+     4,
+     385.5
+    ],
+    [
+     3,
+     544
+    ],
+    [
+     2,
+     705
+    ],
+    [
+     1,
+     865
+    ]
+   ],
+   "curves": {
+    "p1.6e16": {
+     "carrier": "p",
+     "conc_cm3": 1.6e+16
+    },
+    "p2.2e17": {
+     "carrier": "p",
+     "conc_cm3": 2.2e+17
+    },
+    "hp": {
+     "carrier": "high_purity",
+     "conc_cm3": 0.0
+    }
+   },
+   "segments": [
+    {
+     "id": "6A steep rows",
+     "kind": "row",
+     "levels": [
+      1100,
+      2320,
+      20
+     ],
+     "window": [
+      1.4015,
+      1.43
+     ],
+     "assign": [
+      "p2.2e17",
+      "p1.6e16+hp"
+     ]
+    },
+    {
+     "id": "6B peak cols",
+     "kind": "col",
+     "levels": [
+      1.4235,
+      1.4675,
+      45
+     ],
+     "window": [
+      2500,
+      9500
+     ],
+     "always_drop_grid": true,
+     "assign": [
+      "p2.2e17",
+      "p1.6e16",
+      "hp"
+     ]
+    },
+    {
+     "id": "6C1 two lines",
+     "kind": "col",
+     "levels": [
+      1.4825,
+      1.5975,
+      47
+     ],
+     "window": [
+      7000,
+      25000
+     ],
+     "always_drop_grid": true,
+     "max_width": 14,
+     "assign": [
+      "p1.6e16+hp",
+      "p2.2e17"
+     ]
+    },
+    {
+     "id": "6C2 one line",
+     "kind": "col",
+     "levels": [
+      1.4825,
+      1.5975,
+      47
+     ],
+     "window": [
+      7000,
+      25000
+     ],
+     "always_drop_grid": true,
+     "max_width": 14,
+     "assign": [
+      "p1.6e16+p2.2e17+hp"
+     ]
+    }
+   ]
+  }
+ }
+}

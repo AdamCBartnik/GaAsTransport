@@ -30,7 +30,9 @@ physics is applied, so these records can be handed to a separate surface/interfa
 python -m pytest -q                                   # unit tests (~4 min)
 PYTHONPATH=. python validation/stage_a_rates.py        # C21 Figs. 7, 8, 10-12 (Stage A subset)
 PYTHONPATH=. python validation/stage_bc_rates.py       # C21 Figs. 7, 8, 10-13 (full Gamma set)
-PYTHONPATH=. python validation/excitation.py           # C21 Figs. 3, 5, 6 (MC-sampled ESP0)
+PYTHONPATH=. python validation/excitation.py           # C21 Figs. 5, 6 (MC-sampled ESP0)
+PYTHONPATH=. python validation/absorption.py           # Casey 1975 + Adachi 1989 absorption model
+python tools/digitize_casey1975.py                     # regenerate the Casey dataset from the PDF
 PYTHONPATH=. python validation/stage_a_cooling.py      # phonon steps, detailed balance (Stage A)
 PYTHONPATH=. python validation/eh_detailed_balance.py  # e-h thermalization variants
 PYTHONPATH=. python validation/fig9_drift_velocity.py <N> <p_cm3>     # C21 Fig. 9 (one doping), then `plot`
@@ -57,7 +59,7 @@ s = Sample(gaas_chubenko2021(), per_cm3(1e19))
 mech = build_mechanisms(s, a, stage="C")       # drop list entries to disable mechanisms
 spin = SpinModel(s, [m for m in mech if m.valley_from == 0])
 rng = np.random.default_rng(1)
-ens = photoexcite(s, ev(1.6), 10_000, rng, assumptions=a)          # Adachi (1989) absorption
+ens = photoexcite(s, ev(1.6), 10_000, rng, assumptions=a)          # Casey 1975 + Adachi 1989 absorption
 res = Simulation(s, mech, spin, t_max=370 * PS, assumptions=a).run(ens, rng)
 res.arrivals.save_npz("arrivals.npz")          # t, E, k, valley, spin, z0, n_events, time_in_valley, ...
 print(res.arrivals.upper_valley_summary())

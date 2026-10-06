@@ -28,9 +28,14 @@ Model assumptions (docs/MODEL_ASSUMPTIONS.md; selectable through ModelAssumption
         ESP0 equal to Eq. 12, the hh fraction is (1 + ESP0)/2 and the lh : so split is K_lh : K_so.
         This mode reproduces the relative peak heights of C21 Fig. 5 somewhat better.
   * initial_k_direction = "isotropic" (C21 is silent).
-  * absorption_model = Adachi (1989) MDF for intrinsic GaAs (optics.py; user decision 2). Any
-    object with absorption_coefficient(hv) can be passed instead. Doping-induced gap narrowing
-    is NOT applied to the optical data. Photons with Eg(p) < hv but alpha(hv) = 0 are refused.
+  * absorption_model = "casey1975+adachi1989" (optics.CaseyAdachiAbsorption): measured p-type
+    near-edge absorption (Casey, Sell & Wecht 1975), interpolated in log10(p), blended into
+    Adachi (1989) above 1.55 eV. The measured spectra contain the real doping-induced edge shift,
+    so the window Eg(p) < hv < Eg(intrinsic) is allowed. Any object with absorption_coefficient(hv)
+    can be passed instead; pure Adachi ("adachi1989") is kept for comparison.
+  * Acceptance rule: the band-transition energetics must be satisfied (hv > Eg(p), Eqs. 8-9), and
+    the absorption model must return a finite alpha > 0. Models refuse energies where they are
+    not valid (e.g. Adachi below its E0, where only the E2-oscillator tail remains).
   * hv <= Eg(p): refused unless below_gap_energy is given ([K13] uses 5 meV).
 """
 from __future__ import annotations
@@ -120,7 +125,7 @@ def band_weights(sample, hw, rule):
 
 
 def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_rule=None,
-                broadening=True, below_gap_energy=None, allow_optics_extrapolation=False):
+                broadening=True, below_gap_energy=None):
     """Generate n photoexcited electrons in the Gamma valley at t = 0.
 
     Parameters
@@ -129,14 +134,13 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     hw : photon energy [J]
     n : number of electrons
     rng : numpy.random.Generator
-    absorption : None / "adachi1989" (default model), an object with absorption_coefficient(hv)
-                 [1/m], a scalar absorption length [m], or a callable hv -> length [m]
+    absorption : None (use assumptions.absorption_model), a model name ("casey1975+adachi1989",
+                 "casey1975", "adachi1989"), an object with absorption_coefficient(hv) [1/m],
+                 a scalar absorption length [m], or a callable hv -> length [m]
     assumptions : ModelAssumptions (initial_spin_rule, initial_k_direction, absorption_model)
     spin_rule : overrides assumptions.initial_spin_rule
     broadening : apply Eq. 11
     below_gap_energy : for hv <= Eg(p), place electrons at this energy [J]
-    allow_optics_extrapolation : permit hv below the absorption model's stated validity range
-        (Adachi 1989: hv < E0 = 1.42 eV, where alpha is only the unphysical E2-oscillator tail)
 
     Returns
     -------
@@ -144,23 +148,21 @@ def photoexcite(sample, hw, n, rng, absorption=None, assumptions=DEFAULT, spin_r
     """
     assumptions.validate()
     rule = SPIN_RULE_ALIASES[spin_rule or assumptions.initial_spin_rule]
-    model = as_absorption_model(absorption if absorption is not None else assumptions.absorption_model)
     mat = sample.material
     gv = mat.gamma
-    hv_min = getattr(model, "valid_min_hv_eV", None)
-    if hv_min is not None and hw / EV < hv_min and not allow_optics_extrapolation:
-        raise ValueError(f"hv = {hw / EV:.4f} eV is below the absorption model's validity limit "
-                         f"{hv_min} eV (Adachi 1989: alpha there is only the E2-oscillator tail; "
-                         "gap narrowing is not applied). Pass allow_optics_extrapolation=True to override.")
+    # 1. band-transition energetics (Eqs. 8-9 need hv > Eg(p))
+    if hw <= sample.Eg and below_gap_energy is None:
+        raise ValueError(f"hv = {hw / EV:.4f} eV <= Eg(p) = {sample.Eg / EV:.4f} eV; "
+                         "pass below_gap_energy to override")
+    # 2. a physical absorption coefficient from the chosen model (models raise outside validity)
+    model = as_absorption_model(absorption if absorption is not None else assumptions.absorption_model,
+                                sample)
     alpha_abs = float(np.squeeze(model.absorption_coefficient(hw)))
-    if not alpha_abs > 0:
-        raise ValueError(f"absorption model gives alpha = {alpha_abs} at hv = {hw / 1.602176634e-19:.4f} eV "
-                         "(e.g. Adachi 1989 is zero below its E0 = 1.42 eV; gap narrowing is not applied)")
+    if not (np.isfinite(alpha_abs) and alpha_abs > 0):
+        raise ValueError(f"absorption model returned alpha = {alpha_abs} at hv = {hw / EV:.4f} eV")
     z0 = -np.log1p(-rng.random(n)) / alpha_abs                              # Eq. 7
 
     if hw <= sample.Eg:
-        if below_gap_energy is None:
-            raise ValueError("photon energy below Eg(p); pass below_gap_energy to override")
         E0 = np.full(n, float(below_gap_energy))
         band = np.full(n, HH, dtype=np.int8)
         spin = np.where(rng.random(n) < 0.75, 1, -1).astype(np.int8)       # 50% (Eq. 4)

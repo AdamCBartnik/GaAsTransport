@@ -7,3 +7,4 @@ examples/out/
 *.npz
 # reference PDFs are copyrighted publisher/thesis files: kept locally, not committed
 refs/*.pdf
+tools/out/

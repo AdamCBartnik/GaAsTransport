@@ -26,10 +26,12 @@ class ModelAssumptions:
     spin +1 with probability (1+P_i)/2.  "chubenko_prose": the literal prose after Eq. 16
     (hh -> +1, lh/so -> -1, with the hh fraction (1+ESP0)/2)."""
     initial_k_direction: str = "isotropic"
-    absorption_model: str = "adachi1989"
-    """"adachi1989": Adachi, JAP 66, 6030 (1989) model dielectric function for intrinsic GaAs,
-    unshifted by doping (band-gap narrowing is NOT applied to the optical data). Any object
-    with ``absorption_coefficient(hv)`` may be passed to photoexcite() instead."""
+    absorption_model: str = "casey1975+adachi1989"
+    """"casey1975+adachi1989" (default): measured p-type near-edge absorption of Casey, Sell & Wecht,
+    JAP 46, 250 (1975), interpolated in hv and log10(p), blended into Adachi (1989) over 1.55-1.592 eV.
+    "casey1975": near-edge data only (1.31-1.59 eV). "adachi1989": Adachi MDF alone (comparison;
+    refuses hv < 1.42 eV). Any object with ``absorption_coefficient(hv)`` may be passed to
+    photoexcite() instead."""
 
     # --- holes and electron-hole scattering -------------------------------------------------
     hole_bands: tuple = ("hh", "lh")
