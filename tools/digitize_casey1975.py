@@ -3,7 +3,7 @@
 The paper gives alpha(E) only as figures (Figs. 6-8, 297 K, log scale 10 to 1e5 cm^-1, 1.30-1.60 eV),
 so the curves are digitized from the page scans embedded in refs/Casey1975_JAP46_250.pdf.
 
-Reproduce:   python tools/digitize_casey1975.py
+Reproduce:   python tools/digitize_casey1975.py [output.csv]   (default: gaas_mc/data/casey1975_ptype.csv)
 Inputs:      tools/casey1975_digitization.json (calibration guesses and sweep segments)
 Outputs:     gaas_mc/data/casey1975_ptype.csv          digitized points with provenance header
              tools/out/casey1975_<fig>_overlay.png       digitized points drawn on the scan (check these)
@@ -155,7 +155,7 @@ def reject_inconsistent(pts, half_window_eV=0.0025, max_dex=0.025, min_neighbour
     return pts[keep], int((~keep).sum())
 
 
-def main():
+def main(csv_path=None):
     cfg = json.loads(CFG.read_text())
     OUT.mkdir(exist_ok=True)
     log = []
@@ -193,13 +193,13 @@ def main():
                        f"alpha {10 ** pts[:, 1].min():.3g}-{10 ** pts[:, 1].max():.3g} cm^-1")
         overlay(img, cal, ov, OUT / f"casey1975_{fkey}_overlay.png",
                 grid=(grid_E, grid_la), scale=2)
-    write_csv(cfg, rows)
+    write_csv(cfg, rows, csv_path)
     (OUT / "casey1975_report.txt").write_text("\n".join(log) + "\n")
     print("\n".join(l for l in log if not l.startswith("  skip")))
 
 
-def write_csv(cfg, rows):
-    path = ROOT / "gaas_mc" / "data" / "casey1975_ptype.csv"
+def write_csv(cfg, rows, path=None):
+    path = Path(path) if path else ROOT / "gaas_mc" / "data" / "casey1975_ptype.csv"
     path.parent.mkdir(exist_ok=True)
     head = [
         "# Digitized absorption coefficient of GaAs at 297 K",
@@ -218,4 +218,4 @@ def write_csv(cfg, rows):
 
 
 if __name__ == "__main__":
-    main()
+    main(sys.argv[1] if len(sys.argv) > 1 else None)

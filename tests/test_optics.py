@@ -155,8 +155,9 @@ def test_digitization_is_reproducible(tmp_path):
     import subprocess
     import sys
     before = CASEY_CSV.read_text().splitlines()
-    subprocess.run([sys.executable, str(ROOT / "tools" / "digitize_casey1975.py")], check=True,
-                   capture_output=True, cwd=ROOT)
-    after = CASEY_CSV.read_text().splitlines()
+    fresh = tmp_path / "casey1975_ptype.csv"      # never overwrite the committed data file
+    subprocess.run([sys.executable, str(ROOT / "tools" / "digitize_casey1975.py"), str(fresh)],
+                   check=True, capture_output=True, cwd=ROOT)
+    after = fresh.read_text().splitlines()
     assert [l for l in before if not l.startswith("# Produced")] == \
         [l for l in after if not l.startswith("# Produced")]

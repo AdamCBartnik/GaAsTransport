@@ -1,7 +1,7 @@
 # Digitized absorption coefficient of GaAs at 297 K
 # Source: H. C. Casey, Jr., D. D. Sell, K. W. Wecht, J. Appl. Phys. 46, 250 (1975), doi:10.1063/1.321330
 # Figures 6-8 (p-type and high-purity); digitized from the page scans in the publisher PDF
-# Produced by tools/digitize_casey1975.py with tools/casey1975_digitization.json on 2026-10-07
+# Produced by tools/digitize_casey1975.py with tools/casey1975_digitization.json on 2026-10-06
 # Uncertainty: digitization ~ +-1.5 meV in E, ~ +-2.5% in alpha; paper: +-15% for alpha > 1e3 cm^-1
 # merged = 1: this crossing is shared by curves that coincide within the drawn line width
 # columns: figure,curve,carrier,conc_cm3,hv_eV,alpha_cm1,merged
