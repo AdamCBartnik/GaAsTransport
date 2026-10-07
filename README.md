@@ -2,17 +2,16 @@
 
 Monte Carlo simulation of photoexcitation, electron transport, spin relaxation, and emission
 from p-doped GaAs. The model follows O. Chubenko *et al.*, J. Appl. Phys. **130**, 063101 (2021)
-(“C21”), with documented extensions and comparisons to Karkare *et al.* (2013) and its 2015 erratum.
+(“C21”), with documented extensions and comparisons to Karkare *et al.* (2013).
 
 The main workflow produces an ensemble of **electrons emitted into vacuum**: emission times,
 positions, momenta, energies, spins, and valley identities. Beam coordinates are returned as an
 openPMD-beamphysics `ParticleGroup`, ready for analysis or use as a source in a separate vacuum-side
 simulation.
 
-## Start with the emission notebook
+## Example notebook
 
-[**examples/example.ipynb**](examples/example.ipynb) is the recommended
-entry point. Open it in Jupyter, select your Python environment, and run the cells in order:
+[**examples/example.ipynb**](examples/example.ipynb) 
 
 1. Set the photon energy, doping, surface affinity, layer geometry, and simulation time in `params`.
 2. Call `simulate_emission(**params)` to run photoexcitation, transport, and surface emission.
@@ -21,11 +20,6 @@ entry point. Open it in Jupyter, select your Python environment, and run the cel
 5. Compare fresh QE/ESP simulations with the digitized simulation curves and experimental data in C21 Fig. 18.
 
 The tutorial explains every `simulate_emission` argument and uses ParticleGroup's native plots.
-Its Fig. 18 section starts with a modest five-energy sweep, with an option for the full 16-energy
-grid and larger ensembles. Results are cached for repeat runs.
-
-[examples/example_gpt_tools.ipynb](examples/example_gpt_tools.ipynb) preserves the original example
-using `GPT_tools.ParticleGroupExtension` and `GPT_tools.gpt_plot`.
 
 ### Environment
 
@@ -38,7 +32,6 @@ when opened from `examples/`.
 | Compiled CPU engine | Numba |
 | CUDA engine | Numba CUDA support (`numba-cuda`), CuPy, a compatible CUDA runtime and NVIDIA GPU |
 | Main tutorial | Jupyter and Matplotlib; ordinary inline plots |
-| GPT_tools example | Also `ipympl` for `%matplotlib widget` and an importable `GPT_tools` installation |
 | Tests | pytest |
 
 `device="auto"` selects CUDA when available, otherwise the compiled CPU engine. Use `"cpu"` or
@@ -64,7 +57,7 @@ params = dict(
     depletion_scattering="bulk",
     matching_mass="band_edge",
     absorption_model=None,     # default Casey+Adachi absorption; "adachi1989" for C21
-    sigma_xy=0.0,              # added Gaussian laser spot: rms per axis, in metres
+    sigma_xy=0.0,              # Gaussian laser size, use 0.0 to get cathode point spread function
     total_charge=None,         # or a total emitted bunch charge in coulombs
     device="auto",
     seed=1,
@@ -80,8 +73,8 @@ print(f"QE: {100 * run.qe:.2f}%; ESP: {100 * run.esp:.1f}%")
 The tutorial starts with 20,000 generated electrons; increase this for better statistics.
 In particular, `t_max_ps` is a hard transport cutoff: a short run measures emission within that
 time window and excludes the later tail. `n` counts generated photoelectrons, not incident photons
-or emitted particles. `run.qe` includes optical reflection and, for finite layers, absorption in
-the layer. Setting `total_charge` changes the exported particle weights, not the calculated QE.
+or emitted particles. `run.qe` includes optical reflection (assuming normal laser incidence) and corrections for a finite width layer. 
+Setting `total_charge` changes the exported particle weights, not the calculated QE.
 
 | Parameter | Meaning |
 |---|---|
@@ -138,7 +131,7 @@ np.savez(out / "emitted_metadata.npz",
 
 ### Coordinates and units
 
-The simulation places the surface at z = 0, GaAs at positive z, and vacuum at negative z.
+Internally, annoyingly, the simulation places the surface at z = 0 with GaAs at positive z, and vacuum at negative z.
 The exported `ParticleGroup` reverses z and pz so that the outgoing beam travels along **+z**.
 
 | Output | Convention |
@@ -150,10 +143,6 @@ The exported `ParticleGroup` reverses z and pz so that the outgoing beam travels
 | `em.E_vac`, `em.E_perp` | Vacuum kinetic and transverse energies in joules; `em.E_perp.mean()` is MTE |
 | `em.p_vac` | Vacuum momentum in kg·m/s in the simulation frame, with pz < 0 |
 | `em.spin`, `em.valley` | Discrete ±1 spin label along the simulation's +z axis; valley 0/1/2 = Gamma/L/X at emission |
-
-With `sigma_xy=0`, x/y show lateral transport from a point excitation spot. These are surface
-emission events, rather than particle positions at a common later time. Vacuum image-charge,
-space-charge, and DC gun fields belong in the downstream simulation.
 
 ## Model and validation
 
