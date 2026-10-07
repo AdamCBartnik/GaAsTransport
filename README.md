@@ -86,7 +86,7 @@ print(f"Generated: {run.n_generated}; emitted: {run.n_emitted}")
 print(f"QE: {100 * run.qe:.2f}%; ESP: {100 * run.esp:.1f}%")
 ```
 
-The tutorial starts with 20,000 generated electrons; increase this for better statistics.
+The tutorial uses 100,000 generated electrons, as in C21; fewer run faster but are noisier.
 In particular, `t_max_ps` is a hard transport cutoff: a short run measures emission within that
 time window and excludes the later tail. `n` counts generated photoelectrons, not incident photons
 or emitted particles. `run.qe` includes optical reflection (assuming normal laser incidence) and corrections for a finite width layer. 
