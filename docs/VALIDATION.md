@@ -73,7 +73,7 @@ this comparison.
 
 ## Example: surface arrivals without band bending
 
-`examples/surface_arrivals.py`, p = 1e19, hν = 1.60 eV (Adachi l = 616 nm, before the Casey default was adopted), 3000 electrons, 370 ps:
+Produced by `examples/surface_arrivals.py` (since removed; it is in the git history up to commit 3b56c3f), p = 1e19, hν = 1.60 eV (Adachi l = 616 nm, before the Casey default was adopted), 3000 electrons, 370 ps:
 * **ESP:** 0.479 at excitation, 0.283 at arrival.
 * **Arrival:** 55% of electrons reach z = 0; the median arrival time is 41 ps.
 * **Upper valleys:** 7% of arrivals ever visited L (none visited X), spending 0.6% of their time there,

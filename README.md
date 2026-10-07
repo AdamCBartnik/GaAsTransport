@@ -40,7 +40,6 @@ The notebook also locates the repository root automatically when opened from `ex
 | Compiled CPU engine | Numba | `fast` |
 | CUDA engine | Numba CUDA support (`numba-cuda`), CuPy, a compatible CUDA 12 runtime and NVIDIA GPU | `cuda` |
 | Main tutorial | Jupyter; distgen for the laser section | `examples` |
-| GPT_tools example | Also `ipympl` and an importable `GPT_tools` installation | (install separately) |
 | Tests | pytest | `test` |
 | Re-digitizing paper figures (`tools/`; needs the local PDFs) | PyMuPDF, Pillow | `tools` |
 
