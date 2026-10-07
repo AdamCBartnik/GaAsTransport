@@ -247,7 +247,7 @@ def test_surface_model_end_to_end_matches_reference():
     assert abs(_zscore(rr.emissions.E_vac, rf.emissions.E_vac)) < 4.5
     assert abs(_zscore(rr.emissions.E_perp, rf.emissions.E_perp)) < 4.5
     assert len(rf.arrivals) == np.sum(rf.ensemble.n_surface > 0)
-    assert np.allclose(np.sum(rf.emissions.p_vac**2, 1) / (2 * M0), rf.emissions.E_vac, rtol=1e-9)
+    assert np.allclose(np.sum(rf.emissions.p_vac**2, 1) / (2 * M0), rf.emissions.E_vac, rtol=1e-9, atol=0)
     em = rf.emissions
     assert np.all(rf.ensemble.status[np.isin(rf.ensemble.pid, em.pid)] == EMITTED)
 

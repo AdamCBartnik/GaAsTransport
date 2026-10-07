@@ -109,7 +109,8 @@ def excess_energy(sample, hw, band):
     if G1 <= 0:
         return G1
     G2 = 1 + mh / me + 2 * a * G1
-    dEh = G2 / (2 * a) * (1 - np.sqrt(1 - 4 * a * (1 + a * G1) * G1 / G2**2))
+    # Rationalized Eq. 9: finite at alpha=0 and stable near the parabolic limit.
+    dEh = 2 * (1 + a * G1) * G1 / (G2 + np.sqrt(G2**2 - 4 * a * (1 + a * G1) * G1))
     return G1 - dEh
 
 

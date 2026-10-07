@@ -54,7 +54,7 @@ P = {name: i for i, name in enumerate(PCOLS)}
 CCOLS = ["C_TMAX", "C_EMAX", "C_ZFIELD", "C_DTMAX", "C_ZBACK", "C_PHI0", "C_DPHI", "C_INV_EMAX",
          "C_ALAT", "C_RBACK"]
 ICOLS = ["I_SURFACE", "I_HAS_MODEL", "I_HAS_BACK", "I_BACK", "I_FLIGHT", "I_HAS_DEPL", "I_NPHI",
-         "I_FLIP_ARRIVAL", "I_SURF_MODE"]
+         "I_FLIP_ARRIVAL", "I_SURF_MODE", "I_BOUNCE_AGGREGATION"]
 SURF_HOST, SURF_ABSORB, SURF_C21 = 0, 1, 2
 C = {name: i for i, name in enumerate(CCOLS)}
 I = {name: i for i, name in enumerate(ICOLS)}
@@ -244,6 +244,7 @@ def pack_tables(sim):
     icfg[I["I_HAS_DEPL"]] = int(depl is not None)
     icfg[I["I_NPHI"]] = n_phi
     icfg[I["I_FLIP_ARRIVAL"]] = int(sim.spin_flip_at_arrival)
+    icfg[I["I_BOUNCE_AGGREGATION"]] = int(sim.surface_bounce_aggregation)
     if sim.inv_tau_s.shape[1] != n_phi:
         raise ValueError("spin table / depletion grid mismatch")
     return dict(E_grid=sim.E_grid, E_lut=E_lut, hole_lut=hole_lut, rate_table=sim.rate_table, local_tables=local_tables,

@@ -27,18 +27,20 @@ def test_particle_group_convention_and_units(run):
     assert np.all(pg.z == 0)
     # sigma_xy = 0: x, y are the lateral displacements inside the GaAs (not all zero)
     assert np.array_equal(pg.x, em.x) and np.array_equal(pg.y, em.y) and np.std(pg.x) > 0
-    assert np.allclose(pg.t, em.t)
+    assert np.array_equal(pg.t, em.t)
     # kinetic energy in vacuum (nonrelativistic, < 1 eV) equals the record's E_vac
     KE = (pg.px**2 + pg.py**2 + pg.pz**2) / (2 * M0 * C_LIGHT**2 / Q_E)        # eV
     assert np.allclose(KE, em.E_vac / Q_E, rtol=1e-6)
     assert pg.species == "electron" and np.all(pg.status == 1)
-    assert np.isclose(pg.charge, Q_E * len(pg))
+    assert np.isclose(pg.charge, Q_E * len(pg), rtol=1e-12, atol=0)
+    mte = np.mean(pg.px**2 + pg.py**2) / (2 * M0 * C_LIGHT**2 / Q_E)
+    assert np.isclose(mte, em.E_perp.mean()/Q_E, rtol=1e-12, atol=0)
 
 
 def test_spot_and_charge(run):
     rng = np.random.default_rng(0)
     pg = to_particle_group(run.emissions, sigma_xy=1e-3, rng=rng, total_charge=1e-12)
-    assert np.isclose(pg.charge, 1e-12)
+    assert np.isclose(pg.charge, 1e-12, rtol=1e-12, atol=0)
     assert abs(np.std(pg.x) / 1e-3 - 1) < 0.25 and abs(np.std(pg.y) / 1e-3 - 1) < 0.25
     # the spot is added to the lateral displacement inside the GaAs
     pg0 = to_particle_group(run.emissions, sigma_xy=1e-3, rng=np.random.default_rng(0))

@@ -119,7 +119,7 @@ def test_eh_conserves_momentum_and_energy(mat, band):
     Ee = lambda kk: bands.E_of_k(np.linalg.norm(kk, axis=1), m.m, m.alpha)
     Eh = lambda kk: HBAR**2 * np.sum(kk * kk, axis=1) / (2 * m.mh)
     before, after = Ee(L["k"]) + Eh(L["k0"]), Ee(L["kp"]) + Eh(L["k0p"])
-    assert np.allclose(after, before, rtol=1e-9)
+    assert np.allclose(after, before, rtol=1e-9, atol=0)
     if mat is MAT_PARABOLIC:          # exact kinematics reduce to C21 Eq. 43, |g'| = |g|
         assert np.allclose(L["s"], L["g"], rtol=1e-9)
 
@@ -241,7 +241,7 @@ def test_spin_frozen_in_upper_valleys_and_time_bookkeeping():
     r = Simulation(s, mech, HugeSpin(), surface="none", t_max=2 * PS).run(ens, rng)
     assert np.all(r.ensemble.spin == 1)                       # no relaxation in X
     tv = r.ensemble.time_in_valley
-    assert np.allclose(tv.sum(axis=1), r.ensemble.t, rtol=1e-12)
+    assert np.allclose(tv.sum(axis=1), r.ensemble.t, rtol=1e-12, atol=0)
     assert np.all(tv[:, :2] == 0) and np.all(r.ensemble.visited[:, 2])
 
 
@@ -255,7 +255,7 @@ def test_valley_transfer_bookkeeping_stage_c():
     ens = Ensemble.create(z=np.ones(n), k=iso_k(E, g.m_eff, g.alpha, rng), E=E, spin=1)
     r = Simulation(s, mech, surface="none", t_max=3 * PS).run(ens, rng)
     e = r.ensemble
-    assert np.allclose(e.time_in_valley.sum(1), e.t, rtol=1e-12)
+    assert np.allclose(e.time_in_valley.sum(1), e.t, rtol=1e-12, atol=0)
     assert e.visited[:, 1:].any(axis=1).mean() > 0.5          # 0.8 eV electrons transfer
     assert np.all(e.visited[e.time_in_valley[:, 1] > 0, 1])
 

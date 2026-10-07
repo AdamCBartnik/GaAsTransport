@@ -54,9 +54,11 @@ surface_bounce_aggregation (default True; surface models that report T in their 
               an electron reflected at z = 0 while the field pushes it back returns after
               t_ret = 2 hbar k_z / |F(0)|. Each return repeats the same state, hence the same
               transmission trial; with one flight time dt (memoryless) the floor(dt / t_ret) returns
-              are booked at once, with a geometric number of failed trials before an emission. Exact
-              in distribution; prevents the stall of grazing electrons (k_z -> 0 needs ~1/(Gamma0
-              t_ret) returns). False: one return per loop iteration (brute force, for tests).
+              are booked at once, with a geometric number of failed trials before an emission.
+              This preserves the explicit short-return approximation in distribution; F(0) is only
+              approximately constant in C21 band bending. Prevents the stall of grazing electrons
+              (k_z -> 0 needs ~1/(Gamma0 t_ret) returns). Disabled when snapshots are requested.
+              False: one return per loop iteration (brute force, for tests).
 
 Backend (gaas_mc/backend.py): backend="numpy" (default) or "cupy" (GPU). The loop below is the same
 code for both; with "cupy" the ensemble, the tables and the random numbers live on the device, and
@@ -553,7 +555,8 @@ class Simulation:
             if self.surface_model is not None:
                 lt = last_T[idx]
                 last_T[idx] = -1.0                       # valid for this flight only
-                if self.surface_bounce_aggregation and not self.spin_flip_at_arrival:
+                # Snapshot interpolation needs every flight interval; a train would skip them.
+                if self.surface_bounce_aggregation and not self.spin_flip_at_arrival and snaps is None:
                     keep, dt = self._bounce_trains(ens, idx, v, inside, lt, dt, rng, emissions)
                     if not bool(np.all(keep)):
                         idx, v, inside, G, dt, timeout = (x[keep] for x in (idx, v, inside, G, dt, timeout))
@@ -568,6 +571,8 @@ class Simulation:
                 self._record_snapshots(ens, idx, state0, v, t0, dt_used, snaps)
             self._lateral(ens, idx, v, state0[2], E1, dt_used)
             ens.z[idx], ens.k[idx], ens.E[idx] = z1, k1, E1
+            if np.any(E1 > self.E_table_max):            # e.g. accelerated by a field during the flight
+                raise RuntimeError("electron energy left the rate table; raise E_table_max")
             ens.t[idx] = t0 + dt_used
             ens.dt_spin[idx] += dt_used
             add_at(ens.time_in_valley, (idx, v), dt_used)
@@ -671,7 +676,7 @@ class Simulation:
         ens.y[idx] += ens.k[idx, 1] * f
 
     def _bounce_trains(self, ens, idx, v, inside, lt, dt, rng, emissions):
-        """Exact aggregation of repeated surface returns (see surface_bounce_aggregation in the module
+        """Aggregation of explicit constant-force short returns (see surface_bounce_aggregation in the module
         docstring). Electrons idx just reflected by the surface model (lt >= 0: that trial's T), at
         z = 0 moving inward in the field region, with t_ret <= min(dt, dt_max): the floor(dt / t_ret)
         returns of this flight are booked at once. Returns (keep, dt): keep is False for electrons

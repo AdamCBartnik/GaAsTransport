@@ -61,7 +61,7 @@ Events = real + self-scattering events. This machine: 16 logical CPU cores, RTX 
   kernel launches (slower, but your own model needs no kernel code).
 * **Surface branches:** `FastSimulation(sim, surface_models=[...])` and
   `run(..., surface_branch=b)` run several C21 models (e.g. several chi) in one launch.
-* **Repeated bounces (exact reformulation).** An electron reflected at z = 0 while the surface field
+* **Repeated bounces (aggregation of short returns).** An electron reflected at z = 0 while the surface field
   pushes it back returns after t_ret = 2 hbar k_z / |F(0)|. The reference treats each return as a
   flight plus a new surface-model call. For grazing incidence (k_z -> 0) the number of returns before
   the next scattering diverges, ~ 1 / (Gamma0 t_ret): one electron in 1e5 needed ~1e9 returns, which
@@ -72,6 +72,10 @@ Events = real + self-scattering events. This machine: 16 logical CPU cores, RTX 
   distribution; encounter counts stay exact bookkeeping. Tested against the reference's one-by-one
   bounces where those are affordable (`test_bounce_train_matches_brute_force`).
   Encounter-count *means* are dominated by these rare electrons; report medians and percentiles.
+  The geometric aggregation is exact for the explicit short-return algorithm, whose use of F(0)
+  is a constant-force approximation in the spatially varying C21 field. Both engines honor
+  `surface_bounce_aggregation=False`. Reference runs with snapshots use explicit returns so that
+  snapshot intervals are not skipped. See `docs/PHYSICS_AUDIT.md` for independent timing checks.
 * **GPU launches** are capped by an adaptive flight budget (~0.15 s per launch), well below the
   Windows display-driver watchdog (~2 s).
 * Not supported in the fast engine (raises; use the reference): snapshots, event logs, fields

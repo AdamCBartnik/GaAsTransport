@@ -104,7 +104,7 @@ def test_kpar_folding_and_valley_restriction():
         assert np.all(info["T"] > 0) and np.any(out == EMIT)
         em = out == EMIT
         assert np.allclose(np.hypot(*info["p_vac"][em, :2].T), 0, atol=1e-30)
-        assert np.allclose(info["p_vac"][em, 2] ** 2 / (2 * M0), info["E_vac_kin"][em], rtol=1e-9)
+        assert np.allclose(info["p_vac"][em, 2] ** 2 / (2 * M0), info["E_vac_kin"][em], rtol=1e-9, atol=0)
 
 
 def test_trapping_below_vacuum_level():
@@ -167,7 +167,7 @@ def test_transport_bookkeeping_and_branching():
     assert np.all(r.ensemble.n_surface[st == TRAPPED] >= 1)
     # E_vac = E_tot - chi > 0 and the vacuum momentum carries exactly that energy
     assert np.all(em.E_vac > 0)
-    assert np.allclose(np.sum(em.p_vac**2, axis=1) / (2 * M0), em.E_vac, rtol=1e-9)
+    assert np.allclose(np.sum(em.p_vac**2, axis=1) / (2 * M0), em.E_vac, rtol=1e-9, atol=0)
 
     # branching: absorb at the first arrival, then continue the arrivals with the surface model
     s, f, a, mech, sm, ens, rng = _bench()

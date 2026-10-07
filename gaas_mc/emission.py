@@ -44,8 +44,10 @@ def to_particle_group(emissions, sigma_xy=0.0, rng=None, total_charge=None):
     """ParticleGroup of emitted electrons (gaas_mc.surface.Emissions); see the module docstring for
     the coordinate convention (z -> -z, p_z -> -p_z: the beam travels along +z)."""
     n = len(emissions)
-    if n == 0:
-        raise ValueError("no emitted electrons")
+    if n == 0:                                      # valid zero-QE run: an empty ParticleGroup
+        z = np.zeros(0)
+        return ParticleGroup(data=dict(x=z, px=z, y=z, py=z, z=z, pz=z, t=z, status=np.zeros(0, int),
+                                       weight=z, species="electron"))
     p = np.asarray(emissions.p_vac, float) * C_LIGHT / Q_E            # kg m/s -> eV/c
     x = np.asarray(emissions.x, float).copy() if emissions.x is not None else np.zeros(n)
     y = np.asarray(emissions.y, float).copy() if emissions.y is not None else np.zeros(n)

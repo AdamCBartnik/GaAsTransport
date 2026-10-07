@@ -850,10 +850,18 @@ def valley_center(v, eqv, a_lat):
 @jit
 def fold_kpar(Kx, Ky, a_lat):
     """C21Surface.fold_kpar: |K_par| folded into the (001) surface Brillouin zone."""
+    x, y = fold_kpar_vector(Kx, Ky, a_lat)
+    return math.sqrt(x * x + y * y)
+
+
+@jit
+def fold_kpar_vector(Kx, Ky, a_lat):
+    """Shortest surface reciprocal-lattice representative, preserving direction."""
     g = 2.0 * math.pi / a_lat
     u = (Kx + Ky) / (2.0 * g)
     w = (Kx - Ky) / (2.0 * g)
     best = math.inf
+    bx, by = 0.0, 0.0
     for du in range(2):
         for dv in range(2):
             mm = math.floor(u) + du
@@ -863,7 +871,8 @@ def fold_kpar(Kx, Ky, a_lat):
             d = rx * rx + ry * ry
             if d < best:
                 best = d
-    return math.sqrt(best)
+                bx, by = rx, ry
+    return bx, by
 
 
 @jit
@@ -948,8 +957,7 @@ def emit(i, fs, ist, branch, em_f, em_i, voff, surf_par, cfg):
     E_tot = voff[v] + E
     kpar = fold_kpar(Kx, Ky, a_lat)
     eps = E_tot - chi - HBAR * HBAR * kpar * kpar / (2.0 * M0)
-    nrm = math.sqrt(Kx * Kx + Ky * Ky)
-    sc = kpar / nrm if nrm > 0.0 else 0.0
+    folded_x, folded_y = fold_kpar_vector(Kx, Ky, a_lat)
     em_f[i, 0] = fs[i, 1]
     em_f[i, 1] = E
     em_f[i, 2] = kx
@@ -958,8 +966,8 @@ def emit(i, fs, ist, branch, em_f, em_i, voff, surf_par, cfg):
     em_f[i, 5] = Kx
     em_f[i, 6] = Ky
     em_f[i, 7] = Kz
-    em_f[i, 8] = HBAR * Kx * sc
-    em_f[i, 9] = HBAR * Ky * sc
+    em_f[i, 8] = HBAR * folded_x
+    em_f[i, 9] = HBAR * folded_y
     em_f[i, 10] = -math.sqrt(2.0 * M0 * (eps if eps > 0.0 else 0.0))
     em_f[i, 11] = E_tot - chi
     em_f[i, 12] = fs[i, 7]
@@ -1022,7 +1030,10 @@ def encounter(i, fs, ist, tiv, vis, n_events, branch, has_arr, arr_f, arr_i, arr
 @jit
 def bounce_train(i, dt, T, fs, ist, tiv, n_flight, branch, em_f, em_i, rng, vpar, voff,
                  surf_par, ftype, fpar, icfg, cfg):
-    """Exact aggregation of repeated surface bounces (fast-engine reformulation, docs/PERFORMANCE.md).
+    """Aggregation of constant-force short surface returns (docs/PERFORMANCE.md).
+
+    The geometric trials preserve the explicit short-return algorithm in distribution. Its use of
+    F(0) across each short return is an approximation for a spatially varying band-bending field.
 
     Electron i was just reflected (z = 0, k_z > 0) and the surface field pushes it back. The
     reference engine treats each return separately: it draws a flight, bounces analytically when
@@ -1118,7 +1129,8 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
         timeout = tau >= rem
         T_prev = last_T[i]                    # transmission of the encounter that just reflected i
         last_T[i] = -1.0                      # valid for this flight only
-        if (inside and icfg[I_SURF_MODE] == 2 and icfg[I_FLIP_ARRIVAL] == 0 and z <= 0.0
+        if (inside and icfg[I_SURF_MODE] == 2 and icfg[I_FLIP_ARRIVAL] == 0
+                and icfg[I_BOUNCE_AGGREGATION] == 1 and z <= 0.0
                 and kz > 0.0):
             handled, emitted, dt_rest = bounce_train(i, dt, T_prev, fs, ist, tiv, n_flight, branch,
                                                      em_f, em_i, rng, vpar, voff, surf_par, ftype,
@@ -1144,6 +1156,9 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
         fl = 0.5 * (1.0 / (1.0 + 2.0 * a * E) + 1.0 / (1.0 + 2.0 * a * E1)) * HBAR / m * dt_used
         fs[i, 7] += kx * fl
         fs[i, 8] += ky * fl
+        if E1 > cfg[C_EMAX]:                  # accelerated beyond the rate table during the flight
+            ist[i, 3] = ERR_TABLE
+            return
         fs[i, 6] += dt_used
         tiv[i, v] += dt_used
         n_flight[i] += 1

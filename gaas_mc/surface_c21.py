@@ -71,6 +71,11 @@ class C21Surface:
     # ------------------------------------------------------------------ geometry / momentum ---
     def fold_kpar(self, K):
         """Fold (Kx, Ky) into the (001) surface BZ; returns |K_par| of the folded vector [1/m]."""
+        folded = self.fold_kpar_vector(K)
+        return np.sqrt(np.sum(folded * folded, axis=1))
+
+    def fold_kpar_vector(self, K):
+        """Shortest surface reciprocal-lattice representative, including its direction."""
         a = self.material.a_lat
         g = 2 * np.pi / a
         kx, ky = K[:, 0], K[:, 1]
@@ -78,14 +83,19 @@ class C21Surface:
         u = (kx + ky) / (2 * g)
         v = (kx - ky) / (2 * g)
         best = xp_of(kx).full(kx.size, np.inf)
+        folded = xp_of(kx).zeros((kx.size, 2))
         for du in (0, 1):
             for dv in (0, 1):
                 m = np.floor(u) + du
                 n = np.floor(v) + dv
                 rx = kx - g * (m + n)
                 ry = ky - g * (m - n)
-                best = np.minimum(best, rx * rx + ry * ry)
-        return np.sqrt(best)
+                norm2 = rx * rx + ry * ry
+                closer = norm2 < best
+                folded[closer, 0] = rx[closer]
+                folded[closer, 1] = ry[closer]
+                best = np.minimum(best, norm2)
+        return folded
 
     def total_energy(self, E_kin, valley):
         """E_tot relative to the Gamma band edge at z = 0 [J]."""
@@ -172,11 +182,9 @@ class C21Surface:
         outcome[emit] = EMIT
         eps = E_tot - self.chi - HBAR**2 * kpar**2 / (2 * M0)
         # vacuum momentum: folded K_par direction kept, p_z from the normal energy (toward vacuum = -z)
-        Kp = K[:, :2]
-        nrm = np.linalg.norm(Kp, axis=1)
-        scale = np.where(nrm > 0, kpar / np.where(nrm > 0, nrm, 1), 0.0)
+        Kp = self.fold_kpar_vector(K)
         p_vac = xp.zeros((E.size, 3))
-        p_vac[:, :2] = HBAR * Kp * scale[:, None]
+        p_vac[:, :2] = HBAR * Kp
         p_vac[:, 2] = -np.sqrt(2 * M0 * np.clip(eps, 0, None))
         info = dict(E_tot=E_tot, eps_vac=eps, kpar=kpar, T=T, p_vac=p_vac, E_vac_kin=E_tot - self.chi)
         return outcome, info
