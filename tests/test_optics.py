@@ -152,6 +152,8 @@ def test_interfaces_and_photoexcite_integration():
                     reason="publisher PDF not present (refs/ is not committed)")
 def test_digitization_is_reproducible(tmp_path):
     """Re-running the digitizer from the PDF reproduces the committed data points exactly."""
+    pytest.importorskip("pymupdf")      # digitizer-only dependencies (the "tools" extra)
+    pytest.importorskip("PIL")
     import subprocess
     import sys
     before = CASEY_CSV.read_text().splitlines()

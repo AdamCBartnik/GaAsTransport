@@ -9,3 +9,5 @@ examples/out/
 refs/*.pdf
 tools/out/
 .ipynb_checkpoints/
+build/
+*.egg-info/

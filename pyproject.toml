@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gaas_mc"
+version = "0.1.0"
+description = "Monte Carlo of spin-polarized photoexcitation, transport, and emission from p-GaAs"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=2.0",               # np.trapezoid
+    "scipy",
+    "matplotlib",
+    "openpmd-beamphysics",
+]
+
+[project.optional-dependencies]
+fast = ["numba"]                                            # compiled CPU engine
+cuda = ["numba", "numba-cuda[cu12]", "cupy-cuda12x"]        # CUDA engine (NVIDIA GPU, CUDA 12)
+examples = ["jupyterlab", "distgen"]                        # examples/example.ipynb
+test = ["pytest"]
+tools = ["pymupdf", "pillow"]                               # tools/: digitizing figures from PDFs
+
+[tool.setuptools.packages.find]
+include = ["gaas_mc*"]
+
+[tool.setuptools.package-data]
+gaas_mc = ["data/*.csv"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

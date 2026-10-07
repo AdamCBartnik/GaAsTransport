@@ -17,27 +17,44 @@ simulation.
 2. Call `simulate_emission(**params)` to run photoexcitation, transport, and surface emission.
 3. Inspect QE, emitted spin polarization, MTE, and the position, momentum, energy, and time distributions.
 4. Save the beam, emission records, and settings to `examples/out/particlegroup_tutorial/`.
-5. Compare fresh QE/ESP simulations with the digitized simulation curves and experimental data in C21 Fig. 18.
+5. Add a Gaussian laser spot and pulse sampled with distgen (YAML in the notebook) to the point-source response.
+6. Compare fresh QE/ESP simulations with the digitized simulation curves and experimental data in C21 Fig. 18.
 
 The tutorial explains every `simulate_emission` argument and uses ParticleGroup's native plots.
 
 ### Environment
 
-Run from a checkout of this repository. The notebook locates the repository root automatically
-when opened from `examples/`.
+Install from a clone of this repository, choosing the optional extras you need:
 
-| Use | Dependencies |
-|---|---|
-| Simulation and particle output | NumPy, SciPy, openPMD-beamphysics |
-| Compiled CPU engine | Numba |
-| CUDA engine | Numba CUDA support (`numba-cuda`), CuPy, a compatible CUDA runtime and NVIDIA GPU |
-| Main tutorial | Jupyter and Matplotlib; ordinary inline plots |
-| Tests | pytest |
+```text
+git clone https://github.com/AdamCBartnik/GaAsTransport.git
+cd GaAsTransport
+python -m pip install -e ".[fast,examples,test]"     # add "cuda" for the GPU engine
+```
+
+The notebook also locates the repository root automatically when opened from `examples/`.
+
+| Use | Dependencies | Extra |
+|---|---|---|
+| Simulation and particle output | NumPy ≥ 2, SciPy, Matplotlib, openPMD-beamphysics | (always) |
+| Compiled CPU engine | Numba | `fast` |
+| CUDA engine | Numba CUDA support (`numba-cuda`), CuPy, a compatible CUDA 12 runtime and NVIDIA GPU | `cuda` |
+| Main tutorial | Jupyter; distgen for the laser section | `examples` |
+| GPT_tools example | Also `ipympl` and an importable `GPT_tools` installation | (install separately) |
+| Tests | pytest | `test` |
+| Re-digitizing paper figures (`tools/`; needs the local PDFs) | PyMuPDF, Pillow | `tools` |
 
 `device="auto"` selects CUDA when available, otherwise the compiled CPU engine. Use `"cpu"` or
 `"cuda"` to choose explicitly, or `"reference"` for the readable NumPy implementation. The first
 compiled run includes compilation time. See [performance and engine details](docs/PERFORMANCE.md)
 for measured throughput and parallel execution.
+
+`simulate_emission` runs in one process. With `device="cpu"`, it uses Numba threads, by default
+one per logical core available to the process (on Linux, the cores in its CPU affinity). Set the
+`NUMBA_NUM_THREADS` environment variable before starting Python to use fewer. On a shared cluster
+node, set it to your allocation (e.g. `$SLURM_CPUS_PER_TASK`), because a scheduler that does not
+bind CPUs leaves every core on the node visible. Thread count does not change the results. `max_workers` applies only to multi-process runs with
+`gaas_mc.parallel.run_parallel`.
 
 ### Run a simulation
 
