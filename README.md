@@ -105,6 +105,13 @@ At p = 1e19 cm⁻³, the C21 band-bending depth is about 0.694 eV, so `chi_eV=0.
 an effective affinity of about −0.024 eV. Full definitions and approximation choices are in
 [Model assumptions](docs/MODEL_ASSUMPTIONS.md).
 
+For finite layers, the emitting surface retains that pinning and the rear band edge is held at
+neutral bulk by an ideal electrical reservoir. Layers thinner than the bulk depletion width
+(about 10 nm at this doping) use a fully depleted analytic profile with a nonzero rear field;
+thicker layers retain the original C21 profile. This depletion approximation does not solve for
+mobile charge self-consistently. `R_back` controls electron reflection independently of this
+electrical boundary condition. See [finite-layer electrostatics](docs/MODEL_ASSUMPTIONS.md#finite-layer-electrostatics-2026-10-13).
+
 ### Analyze and save the emitted particles
 
 Use the returned ParticleGroup directly for beam properties and plots:

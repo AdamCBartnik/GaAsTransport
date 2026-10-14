@@ -44,12 +44,13 @@ Boundaries:
               the flight stops at z = d, the model decides once per encounter between specular
               reflection (k_z -> -k_z; energy, k_par, valley and spin unchanged) and loss into the
               substrate (status BACK). Back encounters are counted in Ensemble.n_back ("absorb" and
-              back models). The rest of the physics is unchanged (whole layer = GaAs, semi-infinite
-              band-bending profile: a warning is issued when d < 3 W_bb).
+              back models). Use C21BandBending(sample, thickness=d) for pinned finite-layer
+              electrostatics. Truncating a semi-infinite field still warns when d < 3 W_bb.
 dt_max_field: velocity-Verlet substep in the field region. Default (None): h = min(2 fs, 0.05/omega),
               omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
               C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
               < 0.15 meV, versus ~2 meV for the 1 fs step used in C21 (second order, tested).
+              Fully depleted thin layers also limit h by 0.05*sqrt(m_Gamma*d/(e*max|E_z|)).
 surface_bounce_aggregation (default True; surface models that report T in their info dict):
               an electron reflected at z = 0 while the field pushes it back returns after
               t_ret = 2 hbar k_z / |F(0)|. Each return repeats the same state, hence the same
@@ -173,11 +174,14 @@ class Simulation:
         self._check_back_boundary()
 
     def _check_back_boundary(self):
+        thickness = getattr(self.field, "thickness", None)
+        if thickness is not None and self.z_back != thickness:
+            raise ValueError("finite-layer field thickness must equal the transport back boundary")
         if self.z_back is None:
             return
         import warnings
         zmax = float(getattr(self.field, "z_max", 0.0))
-        if 0 < zmax < np.inf and self.z_back < 3 * zmax:
+        if thickness is None and 0 < zmax < np.inf and self.z_back < 3 * zmax:
             warnings.warn(f"layer thickness {self.z_back * 1e9:.1f} nm is comparable to or smaller than "
                           f"the band-bending width {zmax * 1e9:.1f} nm: the semi-infinite electrostatic "
                           "profile is no longer self-consistent (not corrected)", stacklevel=3)
@@ -193,6 +197,13 @@ class Simulation:
         zmax = self.z_field if np.isfinite(self.z_field) else 1e-6
         z = np.linspace(0.0, zmax, 2001)
         grad = np.abs(np.gradient(self.field.Ez(z), z)).max()
+        # A fully depleted ultrathin slab can have a large nearly uniform field:
+        # curvature alone no longer bounds the flight error. Resolve its acceleration
+        # crossing time as well. The compiled engines receive this same dt_max.
+        if getattr(self.field, "fully_depleted", False):
+            Emax = np.max(np.abs(self.field.Ez(z)))
+            if Emax > 0:
+                cap = min(cap, eta * np.sqrt(self.material.gamma.m_eff * zmax / (Q_E * Emax)))
         if grad == 0:
             return cap
         omega = np.sqrt(Q_E * grad / self.material.gamma.m_eff)

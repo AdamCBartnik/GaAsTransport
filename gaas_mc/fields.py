@@ -14,6 +14,8 @@ Every field exposes
     z_max          the field vanishes for z >= z_max (0 for no field, inf if it extends everywhere).
                    Transport uses direct W_total(E) flights at z >= z_max and null-collision flights
                    with velocity-Verlet substeps at z < z_max.
+                   For a fully depleted finite layer z_max is its mandatory back boundary;
+                   the GaAs-side field need not vanish there. No transport beyond it is modeled.
 """
 from __future__ import annotations
 
@@ -60,21 +62,38 @@ class C21BandBending:
         E_z(z) = (2 E_bb / (e W_bb)) (1 - z/W_bb)  for 0 < z < W_bb, 0 beyond          Eq. 62
     The bands bend DOWN toward the surface, so electrons are accelerated toward z = 0.
     E_bb and W_bb can be overridden (e.g. for a different surface Fermi-level pinning).
+
+    thickness [m] fixes the rear band edge to neutral bulk (an ideal reservoir).
+    For d < W the fully depleted slab has U(z) = -E_bb*(1-z/d)
+    + E_bb*z*(d-z)/W**2. For d >= W the bulk profile is unchanged.
+    This is a depletion approximation, not a self-consistent mobile-carrier solve.
+    The thin-slab expressions extend smoothly outside the slab for flight integration;
+    transport must supply a back boundary at d. Ez(d) is the GaAs-side field.
     """
     is_zero = False
 
-    def __init__(self, sample, E_bb=None, W_bb=None):
+    def __init__(self, sample, E_bb=None, W_bb=None, *, thickness=None):
         self.E_bb = float(sample.E_bb if E_bb is None else E_bb)
         self.W = float(sample.W_bb if W_bb is None else W_bb)
-        self.z_max = self.W
+        self.thickness = None if thickness is None else float(thickness)
+        if self.thickness is not None and (not np.isfinite(self.thickness) or self.thickness <= 0):
+            raise ValueError("thickness must be finite and positive")
+        self.fully_depleted = self.thickness is not None and self.thickness < self.W
+        self.z_max = self.thickness if self.fully_depleted else self.W
 
     def Ez(self, z):
         z = asarray(z, float)
+        if self.fully_depleted:
+            d = self.thickness
+            return self.E_bb / Q_E * (1 / d + (d - 2 * z) / self.W**2)
         x = np.clip(1.0 - z / self.W, 0.0, None)
         return 2 * self.E_bb / (Q_E * self.W) * x                         # Eq. 62
 
     def band_edge(self, z):
         z = asarray(z, float)
+        if self.fully_depleted:
+            d = self.thickness
+            return -self.E_bb * (1 - z / d) + self.E_bb * z * (d - z) / self.W**2
         x = np.clip(1.0 - z / self.W, 0.0, None)
         return -self.E_bb * x**2                                          # Eq. 61
 

@@ -130,7 +130,10 @@ def pack_tables(sim):
     elif isinstance(f, UniformField):
         ftype, fpar = 1, [f.E0, 0.0]
     elif isinstance(f, C21BandBending):
-        ftype, fpar = 2, [f.E_bb, f.W]
+        if f.fully_depleted:
+            ftype, fpar = 3, [f.E_bb, f.W, f.thickness]
+        else:
+            ftype, fpar = 2, [f.E_bb, f.W]
     else:
         raise NotImplementedError(f"field {type(f).__name__}: use the reference engine")
     mechs = sim.mechanisms

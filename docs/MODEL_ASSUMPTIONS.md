@@ -274,12 +274,40 @@ GaAs/substrate boundary.
 
 | Item | Choice |
 |---|---|
-| Material | GaAs everywhere in 0 < z < d with the unchanged physics: same scattering, the semi-infinite C21 band-bending profile at the front, no back-interface potential, no substrate transport. A warning is issued when d < 3 W_bb (the electrostatic profile is then not self-consistent; not corrected). |
+| Material | GaAs everywhere in 0 < z < d, with no substrate transport. `simulate_emission` uses the analytic finite-layer depletion profile below: fixed front pinning and a rear band edge held at neutral bulk by an ideal electrical reservoir. |
 | Back boundary | `Simulation(..., z_back=d, back=PartialReflector(R_back))`. The flight stops at z = d (exact crossing time and energy-conserving state, as at the front surface). One random decision per encounter: reflected with probability R_back (k_z → −k_z; energy, k_x, k_y, valley, equivalent valley and spin unchanged), otherwise lost into the substrate (status `BACK`). R_back = 0: absorbing substrate; R_back = 1: perfectly reflecting back surface. |
 | Records | `Ensemble.n_back` (back encounters; reached the back ⇔ n_back > 0; lost ⇔ status BACK), also in `SurfaceArrivals.n_back` and `Emissions.n_back`. |
 | Generation | Beer–Lambert truncated to the layer, P(z) = α e^(−αz)/(1 − e^(−αd)); fraction of incident photons absorbed in the layer `layer_absorption()` = (1 − R)(1 − e^(−αd)); QE = A_layer·N_emitted/N_generated. No optical interference, no reflection of light at z = d. |
 | Modularity | The back boundary is an object with `interact(k, E, valley, rng, pid) → reflected?`, the counterpart of the surface model; a physical GaAs/AlGaAs interface model can replace `PartialReflector`. The fast engine compiles `PartialReflector`; other back models currently need the reference engine. |
 | Not supported | A field that pushes electrons into the back boundary (repeated back returns would need the bounce aggregation of the front surface); raises. The C21 band bending always pushes toward z = 0. The legacy `back="reflect"` (mirror wall, closed-slab tests) and `back="absorb"` are unchanged. |
+
+### Finite-layer electrostatics (2026-10-13)
+
+`C21BandBending(sample, thickness=d)` takes d in metres. With U = E_C(z) - E_C(bulk)
+in joules, B = E_bb and W = W_bb, it uses
+
+- d < W: U(z) = -B(1-z/d) + B z(d-z)/W² throughout the fully depleted layer.
+- d >= W: U(z) = -B(1-z/W)² for z < W, and zero beyond W (the original C21 profile).
+
+The field is E_z = U'/e. In the thin branch, E_z = (B/e)[1/d + (d-2z)/W²].
+Both branches impose U(0) = -B and U(d) = 0, join continuously at d = W, and have
+the same depleted acceptor charge density, U'' = -e² N_A/epsilon. For d << W the
+field approaches B/(e d). The GaAs-side rear field is nonzero for d < W; the assumed
+reservoir/interface supports it. This is a fixed-potential boundary, not midgap pinning
+on both surfaces. `R_back` independently determines photoelectron reflection/loss.
+
+This is the sharp depletion approximation, not a Poisson solve with mobile charge.
+The `local` scattering option still evaluates the existing Fermi-Dirac hole population
+in this prescribed potential; that population is not fed back into the electrostatics.
+No surface photovoltage, quantum confinement, or substrate band structure is added.
+
+The high-level driver passes `thickness_nm` to this field automatically. Lower-level
+callers must pass the same d to the field and `Simulation(z_back=d)`; mismatches raise.
+Omitting the field's `thickness` retains the old semi-infinite profile, including the
+legacy warning if it is truncated by a nearby transport back boundary.
+The reference, compiled CPU, and CUDA engines use the same analytic expressions.
+Historical Stage F results obtained with a truncated bulk profile are not recomputed;
+results for d >= W are unaffected by this electrostatic change.
 
 ## 6f. Lateral position (bookkeeping)
 

@@ -90,7 +90,8 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
     electrons as a ParticleGroup (EmissionRun.particle_group).
 
     thickness_nm: None = semi-infinite cathode; otherwise a GaAs layer 0 < z < d with a back boundary
-                  of reflection coefficient R_back (gaas_mc/back.py).
+                  of reflection coefficient R_back (gaas_mc/back.py). The rear band edge is pinned
+                  to neutral bulk; for d < W_bb the whole layer is depleted with nonzero rear field.
     depletion_scattering: "bulk" (C21 baseline) or "local". matching_mass: "band_edge" (default) or
                   "velocity". absorption_model: None = the ModelAssumptions default (Casey 1975 +
                   Adachi 1989); "adachi1989" as in C21.
@@ -115,10 +116,10 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
     a = ModelAssumptions(**kw)
     mat = gaas_chubenko2021()
     s = Sample(mat, per_cm3(p_cm3))
-    field = C21BandBending(s)
+    d = None if thickness_nm is None else float(thickness_nm) * 1e-9
+    field = C21BandBending(s, thickness=d)
     mech = build_mechanisms(s, a, "C", field=field)
     sm = SpinModel(s, [m for m in mech if m.valley_from == 0])
-    d = None if thickness_nm is None else float(thickness_nm) * 1e-9
     surface = C21Surface(chi=ev(chi_eV), material=mat, matching_mass=matching_mass)
     sim = Simulation(s, mech, sm, field=field, surface=surface, z_back=d,
                      back=PartialReflector(R_back) if d is not None else "absorb",
