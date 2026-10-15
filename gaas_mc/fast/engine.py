@@ -130,7 +130,9 @@ def pack_tables(sim):
     elif isinstance(f, UniformField):
         ftype, fpar = 1, [f.E0, 0.0]
     elif isinstance(f, C21BandBending):
-        if f.fully_depleted:
+        if f.rear == "vacuum":
+            ftype, fpar = 4, [f.E_bb, f.W, f.thickness]
+        elif f.fully_depleted:
             ftype, fpar = 3, [f.E_bb, f.W, f.thickness]
         else:
             ftype, fpar = 2, [f.E_bb, f.W]

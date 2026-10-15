@@ -63,39 +63,73 @@ class C21BandBending:
     The bands bend DOWN toward the surface, so electrons are accelerated toward z = 0.
     E_bb and W_bb can be overridden (e.g. for a different surface Fermi-level pinning).
 
-    thickness [m] fixes the rear band edge to neutral bulk (an ideal reservoir).
-    For d < W the fully depleted slab has U(z) = -E_bb*(1-z/d)
-    + E_bb*z*(d-z)/W**2. For d >= W the bulk profile is unchanged.
+    thickness [m] makes a finite layer 0 < z < d; rear sets the electrostatic condition at z = d.
+    With U = E_C(z) - E_C(bulk), B = E_bb and W = W_bb:
+      rear="bulk": the rear band edge is fixed to neutral bulk (an ideal reservoir).
+        d < W:  U(z) = -B(1-z/d) + B z(d-z)/W**2 (fully depleted, nonzero rear field);
+        d >= W: the bulk C21 profile, unchanged.
+      rear="vacuum": the rear surface has the same mid-gap pinning as the front, U(0) = U(d) = -B.
+        d < 2W:  U(z) = -B + B z(d-z)/W**2 (fully depleted, symmetric about d/2);
+        d >= 2W: U(z) = -B[(1-z/W)_+**2 + (1-(d-z)/W)_+**2] (a C21 profile at each surface).
+        The field pushes electrons in z > d/2 toward the rear; z_max = d.
     This is a depletion approximation, not a self-consistent mobile-carrier solve.
-    The thin-slab expressions extend smoothly outside the slab for flight integration;
+    The finite-layer expressions extend smoothly outside the slab for flight integration;
     transport must supply a back boundary at d. Ez(d) is the GaAs-side field.
     """
+    REARS = ("bulk", "vacuum")
     is_zero = False
 
-    def __init__(self, sample, E_bb=None, W_bb=None, *, thickness=None):
+    def __init__(self, sample, E_bb=None, W_bb=None, *, thickness=None, rear="bulk"):
         self.E_bb = float(sample.E_bb if E_bb is None else E_bb)
         self.W = float(sample.W_bb if W_bb is None else W_bb)
         self.thickness = None if thickness is None else float(thickness)
         if self.thickness is not None and (not np.isfinite(self.thickness) or self.thickness <= 0):
             raise ValueError("thickness must be finite and positive")
-        self.fully_depleted = self.thickness is not None and self.thickness < self.W
-        self.z_max = self.thickness if self.fully_depleted else self.W
+        if rear not in self.REARS:
+            raise ValueError(f"rear {rear!r}: use one of {self.REARS}")
+        if rear == "vacuum" and self.thickness is None:
+            raise ValueError('rear="vacuum" needs a finite thickness')
+        self.rear = rear
+        if rear == "vacuum":
+            self.fully_depleted = self.thickness < 2 * self.W
+            self.z_max = self.thickness
+        else:
+            self.fully_depleted = self.thickness is not None and self.thickness < self.W
+            self.z_max = self.thickness if self.fully_depleted else self.W
 
     def Ez(self, z):
         z = asarray(z, float)
+        B, W, d = self.E_bb, self.W, self.thickness
+        if self.rear == "vacuum":
+            if self.fully_depleted:
+                return B / Q_E * (d - 2 * z) / W**2
+            return 2 * B / (Q_E * W) * (np.clip(1.0 - z / W, 0.0, None) - np.clip(1.0 - (d - z) / W, 0.0, None))
         if self.fully_depleted:
-            d = self.thickness
-            return self.E_bb / Q_E * (1 / d + (d - 2 * z) / self.W**2)
-        x = np.clip(1.0 - z / self.W, 0.0, None)
-        return 2 * self.E_bb / (Q_E * self.W) * x                         # Eq. 62
+            return B / Q_E * (1 / d + (d - 2 * z) / W**2)
+        x = np.clip(1.0 - z / W, 0.0, None)
+        return 2 * B / (Q_E * W) * x                                      # Eq. 62
 
     def band_edge(self, z):
         z = asarray(z, float)
+        B, W, d = self.E_bb, self.W, self.thickness
+        if self.rear == "vacuum":
+            if self.fully_depleted:
+                return -B + B * z * (d - z) / W**2
+            return -B * (np.clip(1.0 - z / W, 0.0, None)**2 + np.clip(1.0 - (d - z) / W, 0.0, None)**2)
         if self.fully_depleted:
-            d = self.thickness
-            return -self.E_bb * (1 - z / d) + self.E_bb * z * (d - z) / self.W**2
-        x = np.clip(1.0 - z / self.W, 0.0, None)
-        return -self.E_bb * x**2                                          # Eq. 61
+            return -B * (1 - z / d) + B * z * (d - z) / W**2
+        x = np.clip(1.0 - z / W, 0.0, None)
+        return -B * x**2                                                  # Eq. 61
+
+    @property
+    def E_bb_eff(self):
+        """Band-bending height actually present [J]: highest band edge in the layer minus the surface
+        band edge, max_z U(z) - U(0). Equals E_bb except for rear="vacuum" with d < 2W, where the
+        band edge peaks below bulk at z = d/2 and E_bb_eff = E_bb d**2/(4 W**2). The effective
+        affinity relative to that peak is chi - E_bb_eff."""
+        if self.rear == "vacuum" and self.fully_depleted:
+            return self.E_bb * self.thickness**2 / (4 * self.W**2)
+        return self.E_bb
 
 
 class CallableField:

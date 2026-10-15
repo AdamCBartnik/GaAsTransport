@@ -274,16 +274,16 @@ GaAs/substrate boundary.
 
 | Item | Choice |
 |---|---|
-| Material | GaAs everywhere in 0 < z < d, with no substrate transport. `simulate_emission` uses the analytic finite-layer depletion profile below: fixed front pinning and a rear band edge held at neutral bulk by an ideal electrical reservoir. |
+| Material | GaAs everywhere in 0 < z < d, with no substrate transport. `simulate_emission` uses the analytic finite-layer depletion profiles below: fixed front pinning, and either a rear band edge held at neutral bulk by an ideal electrical reservoir (`rear="bulk"`, default) or the same mid-gap pinning at a free rear surface (`rear="vacuum"`). |
 | Back boundary | `Simulation(..., z_back=d, back=PartialReflector(R_back))`. The flight stops at z = d (exact crossing time and energy-conserving state, as at the front surface). One random decision per encounter: reflected with probability R_back (k_z → −k_z; energy, k_x, k_y, valley, equivalent valley and spin unchanged), otherwise lost into the substrate (status `BACK`). R_back = 0: absorbing substrate; R_back = 1: perfectly reflecting back surface. |
 | Records | `Ensemble.n_back` (back encounters; reached the back ⇔ n_back > 0; lost ⇔ status BACK), also in `SurfaceArrivals.n_back` and `Emissions.n_back`. |
 | Generation | Beer–Lambert truncated to the layer, P(z) = α e^(−αz)/(1 − e^(−αd)); fraction of incident photons absorbed in the layer `layer_absorption()` = (1 − R)(1 − e^(−αd)); QE = A_layer·N_emitted/N_generated. No optical interference, no reflection of light at z = d. |
 | Modularity | The back boundary is an object with `interact(k, E, valley, rng, pid) → reflected?`, the counterpart of the surface model; a physical GaAs/AlGaAs interface model can replace `PartialReflector`. The fast engine compiles `PartialReflector`; other back models currently need the reference engine. |
-| Not supported | A field that pushes electrons into the back boundary (repeated back returns would need the bounce aggregation of the front surface); raises. The C21 band bending always pushes toward z = 0. The legacy `back="reflect"` (mirror wall, closed-slab tests) and `back="absorb"` are unchanged. |
+| Not supported | A field that pushes electrons into a *reflecting* back boundary (R_back > 0; repeated back returns would need the bounce aggregation of the front surface); raises. With R_back = 0 every back encounter is final, so such a field is allowed (`rear="vacuum"`). The legacy `back="reflect"` (mirror wall, closed-slab tests) and `back="absorb"` are unchanged. |
 
 ### Finite-layer electrostatics (2026-10-13)
 
-`C21BandBending(sample, thickness=d)` takes d in metres. With U = E_C(z) - E_C(bulk)
+`C21BandBending(sample, thickness=d, rear="bulk")` takes d in metres. With U = E_C(z) - E_C(bulk)
 in joules, B = E_bb and W = W_bb, it uses
 
 - d < W: U(z) = -B(1-z/d) + B z(d-z)/W² throughout the fully depleted layer.
@@ -294,7 +294,41 @@ Both branches impose U(0) = -B and U(d) = 0, join continuously at d = W, and hav
 the same depleted acceptor charge density, U'' = -e² N_A/epsilon. For d << W the
 field approaches B/(e d). The GaAs-side rear field is nonzero for d < W; the assumed
 reservoir/interface supports it. This is a fixed-potential boundary, not midgap pinning
-on both surfaces. `R_back` independently determines photoelectron reflection/loss.
+on both surfaces (that is `rear="vacuum"`, below). `R_back` independently determines
+photoelectron reflection/loss.
+
+**`rear="vacuum"` (2026-10-15).** The rear is a free surface with the same mid-gap pinning as the
+front, U(0) = U(d) = -B:
+
+- d < 2W: U(z) = -B + B z(d-z)/W², E_z = (B/(e W²))(d - 2z), fully depleted and symmetric about d/2.
+  The band edge peaks at U(d/2) = -B(1 - d²/4W²), below bulk.
+- d >= 2W: U(z) = -B[(1-z/W)₊² + (1-(d-z)/W)₊²], a C21 profile at each surface with flat bands
+  between.
+
+The two branches join continuously at d = 2W and carry the same acceptor charge density as the
+bulk profile. The field pushes electrons in z > d/2 toward the rear. They leave there and are not
+part of the beam, so the driver sets R_back = 0 (with a warning if another value was passed); rear
+emission is not modelled. The field region is the whole layer (z_max = d), so flights everywhere
+use null collisions with velocity-Verlet substeps. That is exact but slower than `"bulk"` for thick
+layers. With `thickness_nm=None` the semi-infinite profile is used and `rear` is ignored.
+
+Measured effect (p = 1e19 cm⁻³, W = 9.9 nm, χ = 0.67 eV, hv = 1.6 eV, 100k generated, 370 ps, CUDA):
+
+| d (nm) | QE bulk rear (%) | QE vacuum rear (%) | reached rear, vacuum (%) |
+|---|---|---|---|
+| 5 | 0.031 | 0 | 50 |
+| 15 | 0.133 | 0.0006 | 50 |
+| 30 | 0.30 | 0.21 | 54 |
+| 100 | 0.99 | 0.93 | 51 |
+| 300 | 2.65 | 2.61 | 47 |
+
+Below 2W the middle of the layer stays well below the bulk band edge (0.30 eV below at 15 nm), so
+thermalized electrons cannot reach the emission threshold and near-gap emission is suppressed.
+
+`C21BandBending.E_bb_eff` gives the band-bending height actually present, max_z U(z) - U(0): E_bb,
+except for `rear="vacuum"` with d < 2W, where it is E_bb d²/(4W²). The affinity relative to the
+highest band edge in the layer is then chi - E_bb_eff. `simulate_emission` returns its field as
+`run.field`.
 
 This is the sharp depletion approximation, not a Poisson solve with mobile charge.
 The `local` scattering option still evaluates the existing Fermi-Dirac hole population

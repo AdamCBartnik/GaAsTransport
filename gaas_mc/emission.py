@@ -76,6 +76,7 @@ class EmissionRun:
     qe: float                     # emitted electrons per incident photon
     esp: float                    # spin polarization of the emitted electrons
     settings: dict
+    field: object = None          # the C21BandBending used (e.g. field.E_bb_eff, field.band_edge(z))
 
     @property
     def n_emitted(self):
@@ -83,15 +84,19 @@ class EmissionRun:
 
 
 def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0, thickness_nm=None,
-                      R_back=0.0, depletion_scattering="bulk", matching_mass="band_edge",
+                      R_back=0.0, rear="bulk", depletion_scattering="bulk", matching_mass="band_edge",
                       absorption_model=None, device="auto", seed=0, sigma_xy=0.0, total_charge=None):
     """Photoexcite n electrons at photon energy hv_eV in p-GaAs (doping p_cm3), transport them with
     the C21 band bending and the C21 surface model (electron affinity chi_eV), and return the emitted
     electrons as a ParticleGroup (EmissionRun.particle_group).
 
     thickness_nm: None = semi-infinite cathode; otherwise a GaAs layer 0 < z < d with a back boundary
-                  of reflection coefficient R_back (gaas_mc/back.py). The rear band edge is pinned
-                  to neutral bulk; for d < W_bb the whole layer is depleted with nonzero rear field.
+                  of reflection coefficient R_back (gaas_mc/back.py).
+    rear: electrostatics at the back of a finite layer (ignored when thickness_nm is None).
+          "bulk": the rear band edge is held at neutral bulk; for d < W_bb the whole layer is
+                  depleted with a nonzero rear field.
+          "vacuum": the rear surface has the same mid-gap pinning as the front. Electrons that reach
+                  it leave the layer and are not part of the beam; R_back is set to 0.
     depletion_scattering: "bulk" (C21 baseline) or "local". matching_mass: "band_edge" (default) or
                   "velocity". absorption_model: None = the ModelAssumptions default (Casey 1975 +
                   Adachi 1989); "adachi1989" as in C21.
@@ -117,7 +122,16 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
     mat = gaas_chubenko2021()
     s = Sample(mat, per_cm3(p_cm3))
     d = None if thickness_nm is None else float(thickness_nm) * 1e-9
-    field = C21BandBending(s, thickness=d)
+    if rear not in C21BandBending.REARS:
+        raise ValueError(f"rear {rear!r}: use one of {C21BandBending.REARS}")
+    if d is None:
+        rear = "bulk"
+    elif rear == "vacuum" and R_back != 0:
+        import warnings
+        warnings.warn(f'rear="vacuum": R_back = {R_back} replaced by 0 (electrons reaching the rear '
+                      'surface leave the layer)', stacklevel=2)
+        R_back = 0.0
+    field = C21BandBending(s, thickness=d, rear=rear)
     mech = build_mechanisms(s, a, "C", field=field)
     sm = SpinModel(s, [m for m in mech if m.valley_from == 0])
     surface = C21Surface(chi=ev(chi_eV), material=mat, matching_mass=matching_mass)
@@ -140,11 +154,13 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
     pg = to_particle_group(em, sigma_xy=sigma_xy, rng=rng, total_charge=total_charge)
     settings = dict(hv_eV=hv_eV, p_cm3=p_cm3, chi_eV=chi_eV, n=int(n), t_max_ps=t_max_ps,
                     thickness_nm=thickness_nm, R_back=R_back if d is not None else None,
+                    rear=rear if d is not None else None,
                     depletion_scattering=depletion_scattering, matching_mass=matching_mass,
                     absorption_model=a.absorption_model, device=device, seed=seed, sigma_xy=sigma_xy)
     return EmissionRun(particle_group=pg, emissions=em, result=res, n_generated=int(n),
                        absorbed_fraction=A, qe=A * len(em) / int(n),
-                       esp=float(em.spin.mean()) if len(em) else float("nan"), settings=settings)
+                       esp=float(em.spin.mean()) if len(em) else float("nan"), settings=settings,
+                       field=field)
 
 
 def _cuda_available():

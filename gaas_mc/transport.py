@@ -44,8 +44,9 @@ Boundaries:
               the flight stops at z = d, the model decides once per encounter between specular
               reflection (k_z -> -k_z; energy, k_par, valley and spin unchanged) and loss into the
               substrate (status BACK). Back encounters are counted in Ensemble.n_back ("absorb" and
-              back models). Use C21BandBending(sample, thickness=d) for pinned finite-layer
+              back models). Use C21BandBending(sample, thickness=d, rear=...) for finite-layer
               electrostatics. Truncating a semi-infinite field still warns when d < 3 W_bb.
+              A field that pushes electrons into the back requires a back model with R_back = 0.
 dt_max_field: velocity-Verlet substep in the field region. Default (None): h = min(2 fs, 0.05/omega),
               omega = sqrt(e max|dE_z/dz| / m_Gamma) (the harmonic time scale of the potential). For the
               C21 band bending at 1e19 cm^-3 this gives 0.25 fs, and crossing it conserves energy to
@@ -185,7 +186,9 @@ class Simulation:
             warnings.warn(f"layer thickness {self.z_back * 1e9:.1f} nm is comparable to or smaller than "
                           f"the band-bending width {zmax * 1e9:.1f} nm: the semi-infinite electrostatic "
                           "profile is no longer self-consistent (not corrected)", stacklevel=3)
-        if self.back_model is not None and not self.field.is_zero:
+        # A field toward the back is fine when nothing reflects there: each encounter is final.
+        if (self.back_model is not None and not self.field.is_zero
+                and getattr(self.back_model, "R_back", None) != 0.0):
             F = -Q_E * float(self.field.Ez(np.array([float(self.z_back)]))[0])
             if F > 0:
                 raise NotImplementedError("the field pushes electrons into the back boundary; repeated "

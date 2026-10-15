@@ -256,7 +256,17 @@ def mech_rate(mi, E, j, wE, fi, rate_table, local_tables, mech_local, thresholds
 # ----------------------------------------------------------------------------------- fields
 @jit
 def field_Ez(z, ftype, fpar):
-    """0 none, 1 uniform, 2 bulk C21, 3 fully depleted slab (E_bb, W, d)."""
+    """0 none, 1 uniform, 2 bulk C21, 3 fully depleted slab (E_bb, W, d), 4 vacuum rear (E_bb, W, d)."""
+    if ftype == 4:
+        if fpar[2] < 2.0 * fpar[1]:
+            return fpar[0] / Q_E * (fpar[2] - 2.0 * z) / fpar[1]**2
+        x = 1.0 - z / fpar[1]
+        if x < 0.0:
+            x = 0.0
+        y = 1.0 - (fpar[2] - z) / fpar[1]
+        if y < 0.0:
+            y = 0.0
+        return 2.0 * fpar[0] / (Q_E * fpar[1]) * (x - y)
     if ftype == 3:
         return fpar[0] / Q_E * (1.0 / fpar[2] + (fpar[2] - 2.0 * z) / fpar[1]**2)
     if ftype == 1:
@@ -272,6 +282,16 @@ def field_Ez(z, ftype, fpar):
 @jit
 def field_band_edge(z, ftype, fpar):
     """fields.*.band_edge (Eq. 61 for the C21 band bending)."""
+    if ftype == 4:
+        if fpar[2] < 2.0 * fpar[1]:
+            return -fpar[0] + fpar[0] * z * (fpar[2] - z) / fpar[1]**2
+        x = 1.0 - z / fpar[1]
+        if x < 0.0:
+            x = 0.0
+        y = 1.0 - (fpar[2] - z) / fpar[1]
+        if y < 0.0:
+            y = 0.0
+        return -fpar[0] * (x * x + y * y)
     if ftype == 3:
         return -fpar[0] * (1.0 - z / fpar[2]) + fpar[0] * z * (fpar[2] - z) / fpar[1]**2
     if ftype == 1:

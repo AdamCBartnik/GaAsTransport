@@ -70,6 +70,7 @@ params = dict(
     t_max_ps=370.0,
     thickness_nm=None,          # semi-infinite; use e.g. 200 for a finite layer
     R_back=0.0,                 # back reflection probability for a finite layer
+    rear="bulk",                # finite-layer rear: "bulk" reservoir or pinned "vacuum" surface
     depletion_scattering="bulk",
     matching_mass="band_edge",
     absorption_model=None,     # default Casey+Adachi absorption; "adachi1989" for C21
@@ -97,6 +98,7 @@ Setting `total_charge` changes the exported particle weights, not the calculated
 | `hv_eV`, `p_cm3` | Photon energy in eV and acceptor/hole density in cm⁻³ |
 | `chi_eV` | Surface affinity relative to the local Gamma conduction edge; effective bulk affinity is `chi − E_bb` |
 | `thickness_nm`, `R_back` | Layer thickness and probability of specular reflection at the back; otherwise the electron is lost to the substrate |
+| `rear` | Finite-layer rear electrostatics: `"bulk"` (neutral-bulk reservoir, default) or `"vacuum"` (free surface pinned like the front; `R_back` is set to 0) |
 | `depletion_scattering` | `"bulk"` for C21 comparisons (driver default); `"local"` for depleted hole density and local scattering/screening |
 | `matching_mass` | `"band_edge"` by default; `"velocity"` is a surface-model sensitivity option |
 | `absorption_model` | Default: measured Casey data blended with Adachi; use `"adachi1989"` for the C21 benchmark setup |
@@ -105,12 +107,18 @@ At p = 1e19 cm⁻³, the C21 band-bending depth is about 0.694 eV, so `chi_eV=0.
 an effective affinity of about −0.024 eV. Full definitions and approximation choices are in
 [Model assumptions](docs/MODEL_ASSUMPTIONS.md).
 
-For finite layers, the emitting surface retains that pinning and the rear band edge is held at
-neutral bulk by an ideal electrical reservoir. Layers thinner than the bulk depletion width
-(about 10 nm at this doping) use a fully depleted analytic profile with a nonzero rear field;
-thicker layers retain the original C21 profile. This depletion approximation does not solve for
-mobile charge self-consistently. `R_back` controls electron reflection independently of this
-electrical boundary condition. See [finite-layer electrostatics](docs/MODEL_ASSUMPTIONS.md#finite-layer-electrostatics-2026-10-13).
+For finite layers, the emitting surface retains that pinning. With `rear="bulk"` (default), the
+rear band edge is held at neutral bulk by an ideal electrical reservoir. Layers thinner than the
+bulk depletion width (about 10 nm at this doping) use a fully depleted analytic profile with a
+nonzero rear field; thicker layers retain the original C21 profile. `R_back` controls electron
+reflection independently of this electrical boundary condition. With `rear="vacuum"`, the rear
+is a free surface with the same mid-gap pinning, so the bands bend down at both surfaces;
+electrons that drift to the rear leave the layer and are not part of the beam (`R_back` is set
+to 0). Below twice the depletion width the band edge never recovers to bulk and near-gap emission
+is strongly suppressed. Both are depletion approximations that do not solve for mobile charge
+self-consistently. `run.field.E_bb_eff` is the band-bending height actually present in the layer
+(`s.E_bb` except for thin vacuum-rear layers), so the effective affinity is
+`chi_eV - run.field.E_bb_eff / EV`. See [finite-layer electrostatics](docs/MODEL_ASSUMPTIONS.md#finite-layer-electrostatics-2026-10-13).
 
 ### Analyze and save the emitted particles
 
