@@ -1048,7 +1048,31 @@ def encounter(i, fs, ist, tiv, vis, n_events, branch, has_arr, arr_f, arr_i, arr
     if mode == 1:
         ist[i, 3] = SURFACE
         return
+    R = cfg[C_REMIT]                                     # Simulation.emission_radius (< 0: none)
+    if R > 0.0 and fs[i, 7] * fs[i, 7] + fs[i, 8] * fs[i, 8] >= R * R:
+        last_T[i] = 0.0                                  # blocked: reflected, never emitted
+        fs[i, 4] = abs(fs[i, 4])
+        fs[i, 0] = 0.0
+        return
     surface_c21(i, fs, ist, branch, em_f, em_i, last_T, rng, vpar, voff, surf_par, surf_V, cfg)
+
+
+@jit
+def time_to_edge(x, y, vx, vy, R):
+    """transport.time_to_edge for one path (1e308 if it never crosses the circle)."""
+    a = vx * vx + vy * vy
+    if not (a > 0.0):
+        return 1e308
+    b = x * vx + y * vy
+    c = x * x + y * y - R * R
+    disc = b * b - a * c
+    root = math.sqrt(disc) if disc > 0.0 else 0.0
+    if c < 0.0:
+        return (-b + root) / a
+    t = (-b - root) / a
+    if disc > 0.0 and t > 0.0:
+        return t
+    return 1e308
 
 
 @jit
@@ -1080,6 +1104,14 @@ def bounce_train(i, dt, T, fs, ist, tiv, n_flight, branch, em_f, em_i, rng, vpar
     if not (t_ret <= min(dt, cfg[C_DTMAX])):
         return False, False, dt
     n_b = math.floor(dt / t_ret)
+    R = cfg[C_REMIT]
+    if R > 0.0:                                          # stop the train where it skids across the edge
+        v0 = ist[i, 0]
+        f0 = HBAR / (vpar[v0, 0] * (1.0 + 2.0 * vpar[v0, 1] * fs[i, 5]))
+        t_edge = time_to_edge(fs[i, 7], fs[i, 8], fs[i, 2] * f0, fs[i, 3] * f0, R)
+        n_edge = math.floor(t_edge / t_ret) if t_edge < 1e300 else n_b
+        if n_edge < n_b:
+            n_b = n_edge
     nb_done = n_b
     emitted = False
     if T > 0.0:
@@ -1161,7 +1193,7 @@ def advance(i, budget, fs, ist, tiv, vis, n_events, n_rej, n_self, n_flight, rng
                                                      fpar, icfg, cfg)
             if emitted:
                 return
-            if handled:                       # bounces booked; fly the remainder (< t_ret)
+            if handled:                       # bounces booked; fly the remainder (< t_ret unless cut at the emission edge)
                 t0 = fs[i, 1]
                 dt = dt_rest
                 z = fs[i, 0]

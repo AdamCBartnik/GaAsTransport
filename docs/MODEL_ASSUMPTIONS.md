@@ -350,8 +350,38 @@ The sample is laterally homogeneous, so the transport depends on z only. The lat
 arrival and emission records): k_x, k_y are constant during a flight (field along z) and
 v_par = ħk_par/(m(1+2αE)); exact in the field-free region, velocity factor averaged over the start and
 end energy of a flight in the field region (flights there are ~1 fs); electrons bouncing along the
-surface (bounce trains) keep moving laterally. It does not affect any other result (reference engine
-bitwise unchanged). The ParticleGroup output uses x, y = laser-spot point + lateral displacement.
+surface (bounce trains) keep moving laterally. Without an emission radius it does not affect any
+other result. The ParticleGroup output uses x, y = excitation point + lateral displacement.
+
+**Excitation spot (2026-10-30).** `simulate_emission` draws each electron's excitation point before
+transport and stores it in `Ensemble.x/y` (returned as `run.xy0`, row = particle id − 1): a round
+Gaussian of rms `sigma_xy` per axis, a uniform disc of radius `R_flattop` (r = R√u), or a point at
+the origin. The points come from a spawned random stream, so the transport random numbers, and
+hence emission times and displacements, do not depend on the spot. Without `R_cathode` this is
+the same as convolving the point-source response with the spot afterwards. (Before this change,
+`sigma_xy` was added to the output after transport; distributions are unchanged, individual
+positions are not.)
+
+**Emitting area, `R_cathode` (2026-10-30).** An approximate model of a nanostructured barrier on
+the front surface: only the disc x² + y² < R_cathode² emits. An electron reaching z = 0 outside it
+is reflected specularly (k_z → −k_z; energy, k_par, valley and spin unchanged) without consulting
+the surface model, so it is neither emitted nor trapped and keeps moving in the GaAs; its surface
+encounters still count in `n_surface`. Inside the disc the C21 surface model applies unchanged.
+Bounce trains that start outside carry T = 0 (no emission). A train can skid a few nm along the
+surface (v_par·dt), comparable to a 10 nm hole, so it is cut at the last return before its straight
+lateral path crosses the edge; every return is then classified on the correct side to within one
+return (tested against one-return-at-a-time transport with a 20 nm hole). The barrier is fully reflecting and specular, with no trapping, recombination,
+diffuse scattering or change to the band bending under it; the back side is unchanged. The QE
+refers to all electrons generated in the spot and so depends on the spot size. Implemented in
+`Simulation(emission_radius=...)` for the reference engine, the compiled CPU and CUDA kernels,
+and host-side surface models.
+
+Measured scale (100 nm layer, p = 1e19 cm⁻³, χ = 0.67 eV, hv = 1.6 eV, 100k generated, CUDA): the
+point-source spread has rms x ≈ 51 nm (90% of electrons emit within 119 nm). With a 200 nm-radius
+flat-top spot, 20, 50 and 100 nm holes emit 35, 153 and 613 electrons per 100k; 99% of the emission
+from a 50 nm hole occurs within 4.3 ps. Electrons under the barrier that fall into the band-bending
+well are not removed (no recombination), so they skid along the surface until t_max: barrier runs
+take ~10× longer at t_max = 370 ps, and t_max = 20 ps gave identical emission for that case.
 
 ## 6. Other
 

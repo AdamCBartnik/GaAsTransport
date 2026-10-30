@@ -61,6 +61,14 @@ surface_bounce_aggregation (default True; surface models that report T in their 
               approximately constant in C21 band bending. Prevents the stall of grazing electrons
               (k_z -> 0 needs ~1/(Gamma0 t_ret) returns). Disabled when snapshots are requested.
               False: one return per loop iteration (brute force, for tests).
+emission_radius: optional radius R [m] of the emitting area of the front surface (a model of a
+              nanostructured barrier that blocks emission elsewhere). Needs a surface model. An
+              electron reaching z = 0 at x**2 + y**2 >= R**2 is reflected specularly (k_z -> -k_z)
+              without asking the surface model: it is neither emitted nor trapped and keeps moving
+              inside the GaAs. x, y are absolute lateral positions, so excitation points must be set
+              in Ensemble.x, Ensemble.y before the run. Its bounce trains carry T = 0. A train
+              (lateral skid up to v_par * dt, a few nm) is cut at the return before its path crosses
+              the edge, so every return is classified on the correct side to within one return.
 
 Backend (gaas_mc/backend.py): backend="numpy" (default) or "cupy" (GPU). The loop below is the same
 code for both; with "cupy" the ensemble, the tables and the random numbers live on the device, and
@@ -84,6 +92,22 @@ from .spin import flip_probability
 from .surface import Emissions, SurfaceArrivals
 
 EV_NONE, EV_SURFACE, EV_BACK, EV_REGION, EV_WALL = 0, 1, 2, 3, 4
+
+
+def time_to_edge(x, y, vx, vy, R):
+    """Time until the straight lateral path (x + vx t, y + vy t) first crosses the circle of radius
+    R (inf if never): leaving from inside, entering from outside."""
+    a = vx * vx + vy * vy
+    b = x * vx + y * vy
+    c = x * x + y * y - R * R
+    disc = b * b - a * c
+    root = np.sqrt(np.maximum(disc, 0.0))
+    with np.errstate(divide="ignore", invalid="ignore"):
+        t_out = (-b + root) / a                       # inside (c < 0): the positive root
+        t_in = (-b - root) / a                        # outside: first root, if ahead and real
+    t_in = np.where((disc > 0) & (t_in > 0), t_in, np.inf)
+    t = np.where(c < 0, t_out, t_in)
+    return np.where(a > 0, t, np.inf)
 
 
 @dataclass
@@ -121,7 +145,8 @@ class Simulation:
     def __init__(self, sample, mechanisms, spin_model=None, field=None, t_max=370 * PS,
                  surface="absorb", z_back=None, E_table_max=2.0 * EV, n_table=4001,
                  dt_max_field=None, snapshot_times=(), log_events=False, gamma0_margin=1.02,
-                 assumptions=DEFAULT, back="absorb", backend="numpy", surface_bounce_aggregation=True):
+                 assumptions=DEFAULT, back="absorb", backend="numpy", surface_bounce_aggregation=True,
+                 emission_radius=None):
         self.surface_bounce_aggregation = surface_bounce_aggregation
         self.backend = backend
         self.xp = get_xp(backend)
@@ -142,6 +167,13 @@ class Simulation:
         if surface not in ("absorb", "reflect", "none"):
             raise ValueError(surface)
         self.surface = surface
+        if emission_radius is not None:
+            emission_radius = float(emission_radius)
+            if self.surface_model is None:
+                raise ValueError("emission_radius needs a surface model")
+            if not emission_radius > 0:
+                raise ValueError("emission_radius must be positive")
+        self.emission_radius = emission_radius
         self.z_back = z_back
         # back: "absorb" | "reflect" | a back-boundary model with interact(k, E, valley, rng, pid)
         self.back_model = back if getattr(back, "is_back_model", False) else None
@@ -642,6 +674,16 @@ class Simulation:
         back into the semiconductor (specularly, k_z -> -k_z). For reflected electrons the trial's
         transmission (info["T"], if the model reports it) is kept in last_T for _bounce_trains."""
         from .surface_c21 import EMIT, REFLECT, TRAP
+        blocked = self.blocked(ens.x[ih], ens.y[ih])
+        if bool(np.any(blocked)):                     # outside the emitting area: reflect, T = 0
+            ib = ih[blocked]
+            ens.k[ib, 2] = np.abs(ens.k[ib, 2])
+            ens.z[ib] = 0.0
+            if last_T is not None:
+                last_T[ib] = 0.0
+            ih = ih[~blocked]
+            if ih.size == 0:
+                return
         K = ens.k[ih] + valley_center(ens.valley[ih], ens.eqv[ih], self.material.a_lat)
         outcome, info = self.surface_model.interact(ens.k[ih], ens.E[ih], ens.valley[ih], K, rng,
                                                     pid=ens.pid[ih])
@@ -655,6 +697,12 @@ class Simulation:
         ens.z[rf] = 0.0
         if last_T is not None and "T" in info:
             last_T[rf] = info["T"][refl]
+
+    def blocked(self, x, y):
+        """True where the front surface does not emit (outside emission_radius)."""
+        if self.emission_radius is None:
+            return self.xp.zeros(x.shape, bool)
+        return x * x + y * y >= self.emission_radius**2
 
     def _back_interaction(self, ens, ib, rng):
         """Electrons ib at z = z_back: count the encounter; lost (status BACK) or, with a back model,
@@ -713,6 +761,12 @@ class Simulation:
         T = lt[pos]
         trt = t_ret[pos]
         n_b = np.floor(dt[pos] / trt)
+        if self.emission_radius is not None:          # stop the train where it skids across the edge
+            m, a = self._valley_params(v[pos])
+            f = HBAR / (m * (1 + 2 * a * ens.E[it]))
+            t_edge = time_to_edge(ens.x[it], ens.y[it], ens.k[it, 0] * f, ens.k[it, 1] * f,
+                                  self.emission_radius)
+            n_b = np.minimum(n_b, np.floor(t_edge / trt))
         u = rng.random(it.size)
         with np.errstate(divide="ignore", invalid="ignore"):
             k_fail = np.where(T >= 1, 0.0, np.where(T > 0, np.floor(np.log1p(-u) / np.log1p(-T)), np.inf))

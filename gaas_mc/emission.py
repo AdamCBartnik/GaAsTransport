@@ -14,9 +14,11 @@ Coordinates of the ParticleGroup (output convention only; the simulation itself 
     crystal momentum folded into the surface Brillouin zone and conserved, energy from the vacuum
     level). Image-charge acceleration, space charge and any applied field are not included.
   * x, y = (excitation point in the laser spot) + (lateral displacement inside the GaAs between
-    excitation and emission). The excitation point is drawn from a round Gaussian of rms sigma_xy [m]
-    per axis (sigma_xy = 0: a point source, so x, y show the lateral diffusion alone). The lateral
-    displacement is tracked during transport (bookkeeping: the sample is laterally homogeneous).
+    excitation and emission). In simulate_emission the excitation point is drawn before transport,
+    from a round Gaussian of rms sigma_xy [m] per axis or a uniform disc of radius R_flattop [m]
+    (neither: a point source, so x, y show the lateral diffusion alone). The lateral displacement is
+    tracked during transport; it affects the transport only through R_cathode, the radius of the
+    emitting area (outside it the front surface reflects every electron).
   * weight [C]: total_charge / N_emitted per macroparticle if total_charge is given, otherwise the
     electron charge (each macroparticle is one electron).
   * status = 1, species = "electron", id = the simulation's particle id.
@@ -77,6 +79,7 @@ class EmissionRun:
     esp: float                    # spin polarization of the emitted electrons
     settings: dict
     field: object = None          # the C21BandBending used (e.g. field.E_bb_eff, field.band_edge(z))
+    xy0: np.ndarray = None        # (n_generated, 2) excitation points [m], row = particle id - 1
 
     @property
     def n_emitted(self):
@@ -85,7 +88,8 @@ class EmissionRun:
 
 def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0, thickness_nm=None,
                       R_back=0.0, rear="bulk", depletion_scattering="bulk", matching_mass="band_edge",
-                      absorption_model=None, device="auto", seed=0, sigma_xy=0.0, total_charge=None):
+                      absorption_model=None, device="auto", seed=0, sigma_xy=0.0, total_charge=None,
+                      R_flattop=None, R_cathode=None):
     """Photoexcite n electrons at photon energy hv_eV in p-GaAs (doping p_cm3), transport them with
     the C21 band bending and the C21 surface model (electron affinity chi_eV), and return the emitted
     electrons as a ParticleGroup (EmissionRun.particle_group).
@@ -102,8 +106,16 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
                   Adachi 1989); "adachi1989" as in C21.
     device: "auto" (GPU if available, else compiled CPU), "cuda", "cpu" (fast engine) or "reference"
             (NumPy reference engine).
-    sigma_xy: rms laser spot size per axis [m] for the output x, y; total_charge [C]: bunch charge
-              for the ParticleGroup weights (default: one electron per macroparticle).
+    sigma_xy: rms per axis [m] of a round Gaussian laser spot. R_flattop: radius [m] of a uniform
+              (flat-top) round spot instead; give at most one of the two. The excitation points are
+              drawn before transport (a separate random stream, so the transport random numbers do
+              not depend on the spot) and are returned in run.xy0.
+    R_cathode: radius [m] of the emitting area of the front surface, centred on the spot (a
+              nanostructured barrier blocks emission elsewhere). Outside it, electrons reaching the
+              surface are reflected specularly and keep moving in the GaAs. None: the whole surface
+              emits. The QE then refers to the whole spot and depends on its size.
+    total_charge [C]: bunch charge for the ParticleGroup weights (default: one electron per
+              macroparticle).
     """
     from .assumptions import ModelAssumptions
     from .back import PartialReflector
@@ -137,9 +149,11 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
     surface = C21Surface(chi=ev(chi_eV), material=mat, matching_mass=matching_mass)
     sim = Simulation(s, mech, sm, field=field, surface=surface, z_back=d,
                      back=PartialReflector(R_back) if d is not None else "absorb",
-                     t_max=float(t_max_ps) * PS, assumptions=a)
+                     t_max=float(t_max_ps) * PS, assumptions=a, emission_radius=R_cathode)
     rng = np.random.default_rng(seed)
     ens = photoexcite(s, ev(hv_eV), int(n), rng, assumptions=a, thickness=d)
+    ens.x[:], ens.y[:] = excitation_spot(int(n), rng.spawn(1)[0], sigma_xy=sigma_xy, R_flattop=R_flattop)
+    xy0 = np.column_stack([ens.x, ens.y])
     if device == "auto":
         device = "cuda" if _cuda_available() else "cpu"
     if device == "reference":
@@ -151,16 +165,35 @@ def simulate_emission(hv_eV, p_cm3=1e19, chi_eV=0.67, n=100_000, t_max_ps=370.0,
         raise ValueError(f"device {device!r}")
     em = res.emissions
     A = layer_absorption(s, ev(hv_eV), d, assumptions=a)
-    pg = to_particle_group(em, sigma_xy=sigma_xy, rng=rng, total_charge=total_charge)
+    pg = to_particle_group(em, total_charge=total_charge)         # spot already in em.x, em.y
     settings = dict(hv_eV=hv_eV, p_cm3=p_cm3, chi_eV=chi_eV, n=int(n), t_max_ps=t_max_ps,
                     thickness_nm=thickness_nm, R_back=R_back if d is not None else None,
                     rear=rear if d is not None else None,
                     depletion_scattering=depletion_scattering, matching_mass=matching_mass,
-                    absorption_model=a.absorption_model, device=device, seed=seed, sigma_xy=sigma_xy)
+                    absorption_model=a.absorption_model, device=device, seed=seed, sigma_xy=sigma_xy,
+                    R_flattop=R_flattop, R_cathode=R_cathode)
     return EmissionRun(particle_group=pg, emissions=em, result=res, n_generated=int(n),
                        absorbed_fraction=A, qe=A * len(em) / int(n),
                        esp=float(em.spin.mean()) if len(em) else float("nan"), settings=settings,
-                       field=field)
+                       field=field, xy0=xy0)
+
+
+def excitation_spot(n, rng, sigma_xy=0.0, R_flattop=None):
+    """Excitation points (x, y) [m] of n electrons: round Gaussian of rms sigma_xy per axis, or a
+    uniform disc of radius R_flattop (r = R sqrt(u)); a point at the origin if neither is set."""
+    if R_flattop is not None and sigma_xy:
+        raise ValueError("give sigma_xy (Gaussian) or R_flattop (flat-top), not both")
+    if R_flattop is not None:
+        if not R_flattop > 0:
+            raise ValueError("R_flattop must be positive")
+        r = float(R_flattop) * np.sqrt(rng.random(n))
+        phi = 2 * np.pi * rng.random(n)
+        return r * np.cos(phi), r * np.sin(phi)
+    if sigma_xy < 0:
+        raise ValueError("sigma_xy must be >= 0")
+    if sigma_xy > 0:
+        return rng.normal(0.0, sigma_xy, n), rng.normal(0.0, sigma_xy, n)
+    return np.zeros(n), np.zeros(n)
 
 
 def _cuda_available():

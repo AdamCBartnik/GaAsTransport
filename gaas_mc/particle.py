@@ -40,7 +40,7 @@ class Ensemble:
     eqv: np.ndarray              # int8: which equivalent valley (L: 0-3, X: 0-2, Gamma: 0), see valleys.py
     n_surface: np.ndarray        # number of surface encounters
     n_back: np.ndarray           # number of back-boundary (z = z_back) encounters
-    x: np.ndarray                # lateral displacement from the excitation point [m]
+    x: np.ndarray                # lateral position [m]: excitation point (0 by default) + displacement
     y: np.ndarray
 
     @classmethod

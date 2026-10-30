@@ -52,7 +52,7 @@ PCOLS = ["P_HW", "P_EMISSION", "P_A", "P_SCREENED_ANGLE", "P_EBETA", "P_MH", "P_
          "P_GAS", "P_MASS_MODEL", "P_PAULI", "P_EFH", "P_ETA", "P_STATS", "P_DELTA", "P_VTO"]
 P = {name: i for i, name in enumerate(PCOLS)}
 CCOLS = ["C_TMAX", "C_EMAX", "C_ZFIELD", "C_DTMAX", "C_ZBACK", "C_PHI0", "C_DPHI", "C_INV_EMAX",
-         "C_ALAT", "C_RBACK"]
+         "C_ALAT", "C_RBACK", "C_REMIT"]
 ICOLS = ["I_SURFACE", "I_HAS_MODEL", "I_HAS_BACK", "I_BACK", "I_FLIGHT", "I_HAS_DEPL", "I_NPHI",
          "I_FLIP_ARRIVAL", "I_SURF_MODE", "I_BOUNCE_AGGREGATION"]
 SURF_HOST, SURF_ABSORB, SURF_C21 = 0, 1, 2
@@ -225,6 +225,7 @@ def pack_tables(sim):
     cfg[C["C_ZBACK"]] = sim.z_back if sim.z_back is not None else 0.0
     cfg[C["C_INV_EMAX"]] = 1.0 / E_max_grid
     cfg[C["C_ALAT"]] = sim.material.a_lat
+    cfg[C["C_REMIT"]] = sim.emission_radius if sim.emission_radius is not None else -1.0
     if depl is not None:
         cfg[C["C_PHI0"]] = depl.phi[0]
         cfg[C["C_DPHI"]] = depl.phi[1] - depl.phi[0]
@@ -485,6 +486,7 @@ class FastSimulation:
             from ..surface_c21 import EMIT, REFLECT, TRAP
             K = k + valley_center(valley, eqv, sim.material.a_lat)
             outcome, info = sim.surface_model.interact(k, fs[:, 5], valley, K, srng, pid=host.pid[pend])
+            outcome = np.where(sim.blocked(fs[:, 7], fs[:, 8]), REFLECT, outcome)   # emission_radius
             em = outcome == EMIT
             if np.any(em):
                 ie = pend[em]

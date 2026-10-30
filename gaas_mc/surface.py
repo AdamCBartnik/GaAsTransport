@@ -45,7 +45,7 @@ class SurfaceArrivals:
     K: np.ndarray = None                # (n, 3) full crystal wavevector = valley center + k [1/m]
     band_edge_at_surface: float = 0.0   # E_C(z=0) - E_C(bulk) [J] (e.g. -E_bb for C21 band bending)
     n_back: np.ndarray = None           # back-boundary encounters before the arrival (finite layers)
-    x: np.ndarray = None                # lateral displacement from the excitation point [m]
+    x: np.ndarray = None                # lateral position [m]: excitation point (0 unless set) + displacement
     y: np.ndarray = None
     mechanism_names: tuple = ()
 
@@ -141,7 +141,7 @@ class Emissions:
     p_vac: np.ndarray        # (n, 3) momentum in vacuum [kg m/s] (p_z < 0: leaving toward -z)
     E_vac: np.ndarray        # kinetic energy in vacuum above the vacuum level [J]
     n_back: np.ndarray = None   # back-boundary encounters before the emission (finite layers)
-    x: np.ndarray = None        # lateral displacement from the excitation point at emission [m]
+    x: np.ndarray = None        # lateral position at emission [m]: excitation point + displacement
     y: np.ndarray = None
 
     def __len__(self):

@@ -75,6 +75,8 @@ params = dict(
     matching_mass="band_edge",
     absorption_model=None,     # default Casey+Adachi absorption; "adachi1989" for C21
     sigma_xy=0.0,              # Gaussian laser size, use 0.0 to get cathode point spread function
+    R_flattop=None,            # or the radius of a uniform (flat-top) spot, in metres
+    R_cathode=None,            # radius of the emitting area; None = the whole surface emits
     total_charge=None,         # or a total emitted bunch charge in coulombs
     device="auto",
     seed=1,
@@ -98,6 +100,8 @@ Setting `total_charge` changes the exported particle weights, not the calculated
 | `hv_eV`, `p_cm3` | Photon energy in eV and acceptor/hole density in cm⁻³ |
 | `chi_eV` | Surface affinity relative to the local Gamma conduction edge; effective bulk affinity is `chi − E_bb` |
 | `thickness_nm`, `R_back` | Layer thickness and probability of specular reflection at the back; otherwise the electron is lost to the substrate |
+| `sigma_xy`, `R_flattop` | Laser spot: Gaussian rms per axis, or flat-top radius (m); excitation points are drawn before transport and returned in `run.xy0` |
+| `R_cathode` | Radius (m) of the emitting area. Outside it a barrier reflects electrons specularly back into the GaAs, where they keep moving; QE then refers to the whole spot |
 | `rear` | Finite-layer rear electrostatics: `"bulk"` (neutral-bulk reservoir, default) or `"vacuum"` (free surface pinned like the front; `R_back` is set to 0) |
 | `depletion_scattering` | `"bulk"` for C21 comparisons (driver default); `"local"` for depleted hole density and local scattering/screening |
 | `matching_mass` | `"band_edge"` by default; `"velocity"` is a surface-model sensitivity option |
